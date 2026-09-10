@@ -321,9 +321,9 @@ eq('状态已关时不动作，所以不追加', h._restarts, [True, True, True]
 
 h, cfg, dev = new_handler(RestartTask='never')
 h.check_then_set('exercise')
-eq('never: 敏感任务关倍率也不重启', h._restarts, [False])
+eq('never: 敏感任务关倍率时不动游戏（no_stop）', h._restarts, ['no_stop'])
 h.check_then_set('main')
-eq('never: 常规任务开倍率也不重启', h._restarts, [False, False])
+eq('never: 常规任务开倍率也不动游戏', h._restarts, ['no_stop', 'no_stop'])
 
 h, cfg, dev = new_handler(RestartTask='sensitive_only')
 h.check_then_set('exercise')
@@ -336,7 +336,7 @@ h, cfg, dev = new_handler(RestartTask='never')
 h.set_state(False)
 h.read_backend_state = lambda: True
 h.check_on_startup()
-eq('never: 启动纠偏也不重启', h._restarts, [False])
+eq('never: 启动纠偏也不动游戏', h._restarts, ['no_stop'])
 
 # 4.3 未列出任务沿用上次决定（共斗 -> commission -> main3 不能中途把倍率顶开）
 h, cfg, dev = new_handler()

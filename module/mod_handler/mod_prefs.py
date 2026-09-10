@@ -596,12 +596,18 @@ class ModPrefs(ModuleBase):
         if restart is None:
             restart = self.restart_policy == 'always'
 
+        no_stop = restart == 'no_stop'
         logger.info(f'ModPrefs: applying {todo} -> {"ON" if mode else "OFF"} '
                     f'(restart={restart})')
+        if no_stop:
+            logger.warning('ModPrefs: RestartTask=never —— 不停游戏直接改文件。'
+                           '游戏运行中读的是内存副本，这次改动多半不生效，'
+                           '而且会在游戏退出时被覆盖回去。'
+                           '想要倍率真正变化必须让游戏重新加载配置（即重启）。')
 
         # 必须停游戏：应用内存里的副本会在退出时把我们的写入覆盖回去
         was_running = self._is_game_running()
-        if was_running:
+        if was_running and not no_stop:
             logger.info('ModPrefs: stopping game, otherwise the running instance '
                         'overwrites our write when it exits')
             self._app_stop()
@@ -613,7 +619,9 @@ class ModPrefs(ModuleBase):
             failed = True
             raise
         finally:
-            if was_running and restart:
+            if no_stop:
+                pass
+            elif was_running and restart:
                 logger.info('ModPrefs: restarting game so the mod re-reads prefs')
                 try:
                     self._app_start()
@@ -656,11 +664,15 @@ class ModPrefs(ModuleBase):
 
         if restart is None:
             restart = self.restart_policy == 'always'
+        no_stop = restart == 'no_stop'
         logger.info(f'ModPrefs: repairing {todo} -> {"ON" if mode else "OFF"} '
                     f'(restart={restart})')
+        if no_stop:
+            logger.warning('ModPrefs: RestartTask=never —— 不停游戏直接改文件，'
+                           '这次改动多半不生效（见 set_multiplier 的说明）')
 
         was_running = self._is_game_running()
-        if was_running:
+        if was_running and not no_stop:
             logger.info('ModPrefs: stopping game, otherwise the running instance '
                         'overwrites our write when it exits')
             self._app_stop()
@@ -671,7 +683,9 @@ class ModPrefs(ModuleBase):
             failed = True
             raise
         finally:
-            if was_running and restart:
+            if no_stop:
+                pass
+            elif was_running and restart:
                 try:
                     self._app_start()
                 except Exception as e:

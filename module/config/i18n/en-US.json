@@ -3243,10 +3243,10 @@
     },
     "RestartTask": {
       "name": "When to restart the game",
-      "help": "The game must be stopped before rewriting its preferences: the running instance keeps a copy in memory, so editing the file while it runs may take no effect and gets overwritten when the app exits. This option controls whether the game is started again right away.\n\nAlways restart (default): whenever the multiplier state actually changes, restart after writing. Alas tasks do not start the game themselves (they raise GameNotRunningError), so this is the only safe choice. Note it only restarts when the state really changes - if the state is already correct nothing happens.\n\nSensitive tasks only: restart when the multiplier is turned off for Exercise / META / Raid; for other tasks leave the game stopped and let the Alas Restart task bring it back.\n\nNever: only write the config. Changes apply on the next game restart, which may leave the multiplier on when you think it is off.",
-      "sensitive_only": "Sensitive tasks only (game stays stopped otherwise)",
+      "help": "The game must be stopped before rewriting its preferences: it keeps the switches in memory, so editing the file while it runs is not picked up and gets overwritten when the app exits. This option decides whether the game is started again right away.\n\nAlways restart (recommended): on a real state change, stop -> write -> restart and wait for login. It only restarts when the state actually changes.\n\nSensitive tasks only: restart right away when the multiplier is turned off for Exercise / META / Raid; for other tasks only write the file and let Alas run its own Restart task.\n\nNever restart: never touch the game process, only write the file.\nTHIS DOES NOT ACTUALLY CHANGE THE MULTIPLIER - the game will not re-read the config, the change only takes effect after a natural game restart and may be overwritten by the running game.",
+      "sensitive_only": "Sensitive tasks only (Alas starts it otherwise)",
       "always": "Always restart (recommended)",
-      "never": "Never restart (write config only)"
+      "never": "Never restart (writes only, multiplier unchanged)"
     },
     "SensitiveTask": {
       "name": "Tasks that disable the multiplier",
