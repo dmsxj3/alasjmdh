@@ -196,6 +196,16 @@ for lang in ['zh-CN', 'en-US', 'ja-JP', 'zh-TW']:
     check(f'i18n {lang}: ModHandler 文案可安全 .format()（花括号已转义）',
           not _fmt_bad, f'异常={_fmt_bad}')
 
+# 防回归：ModHandler 参数组只能出现在 ModHandler 任务下。
+# 曾经它被挂在 GameManager 下（后来拆成独立任务），但 args.json 打补丁时
+# 漏删旧的那份，导致 GUI 上"游戏管理器"和"悬浮窗倍率控制"两个页面内容重复。
+_dup_tasks = [t for t, groups in args.items()
+              if t != 'ModHandler' and 'ModHandler' in groups]
+check('ModHandler 参数组没有残留在别的任务下', not _dup_tasks,
+      f'残留于={_dup_tasks}')
+eq('GameManager 任务下只剩 GameManager/Storage',
+   sorted(args.get('GameManager', {}).keys()), ['GameManager', 'Storage'])
+
 # 防回归：args.json 里每个叶子节点都必须是含 type/value 的 dict。
 # 曾经把 Storage 块少写一层嵌套，导致 GUI 打开配置页直接
 # TypeError: string indices must be integers。
