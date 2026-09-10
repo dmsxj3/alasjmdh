@@ -350,34 +350,27 @@ class AlasGUI(Frame):
         """
         打开「悬浮窗倍率控制」页面时，把设备上真实的倍率状态填进只读状态栏。
 
-        悬浮窗的开关存在游戏私有目录的 SharedPreferences 里，只有 root 能读；
-        这里直读设备，所以页面上看到的是真实状态而不是缓存值。
-
-        为什么要把假 PIL 换回真的：
-          webui 进程为了省内存把 PIL 换成了假模块（只有 PIL.Image.Image），
-          而读 prefs 需要构造 Device/Adb，其导入链会用到 PIL.ImageDraw。
-          不换回去就会 ImportError: cannot import name 'ImageDraw' from 'PIL'，
-          状态栏永远显示"读不到状态"。用完立刻还原，不影响 webui 的内存优化。
+        为什么不用 ModHandler / Device：
+          webui 进程为了省内存把 PIL 换成了假模块，只要碰到 module.device 的导入链
+          就会 `cannot import name 'ImageDraw' from 'PIL'`（试过换回真 PIL 也不稳，
+          因为残缺模块已经进了 sys.modules）。而读配置只需要一句
+          `adb shell su -c cat <prefs>`，没必要把截图/控制栈拉进来。
+          所以这里直接用 ModPrefs 的纯 adb 只读通道，全程不 import PIL。
         """
         if task != "ModHandler":
             return
 
-        from module.webui.fake_pil_module import (  # noqa: E402
-            import_fake_pil_module, remove_fake_pil_module,
-        )
-
         info = None
         try:
-            remove_fake_pil_module()
-            from module.mod_handler.mod_handler import ModHandler
+            from module.mod_handler.mod_prefs import describe_state_readonly
 
-            handler = ModHandler(config=self.alas_config)
-            info = handler.describe_state()
+            info = describe_state_readonly(config)
+            serial = deep_get(config, ["Alas", "Emulator", "Serial"], default=None)
+            if info.get("option") == "unknown" and serial:
+                info["detail"] = f'{info.get("detail", "")}（Emulator.Serial={serial}）'
         except Exception as e:
-            logger.warning(f"Failed to read modifier state: {e}")
-            info = {"option": "unknown", "detail": f"读取失败: {e}"}
-        finally:
-            import_fake_pil_module()
+            logger.warning(f"Failed to read modifier state: {type(e).__name__}: {e}")
+            info = {"option": "unknown", "detail": f"读取失败: {type(e).__name__}: {e}"}
 
         values = deep_get(config, ["ModHandler", "ModHandler"], default=None)
         if not isinstance(values, dict):

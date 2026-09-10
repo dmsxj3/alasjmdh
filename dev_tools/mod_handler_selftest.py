@@ -493,8 +493,18 @@ check('app.py: alas_set_group 里保留了参数组遍历（否则页面会空�
       'deep_iter(self.ALAS_ARGS[task], depth=1)' in _app_group_body)
 check('app.py: 状态读取失败时会写 warning 日志，便于定位',
       'Failed to read modifier state' in app_src)
-check('app.py: 读状态期间会临时还原真 PIL（否则 ImageDraw 导入失败）',
-      'remove_fake_pil_module()' in app_src and 'import_fake_pil_module()' in app_src)
+check('app.py: 用纯 adb 只读通道读状态（不 import PIL / module.device）',
+      'describe_state_readonly' in app_src)
+check('app.py: 不再依赖临时替换 PIL（旧方案在 GUI 里不稳）',
+      'remove_fake_pil_module' not in app_src)
+with open(os.path.join(ROOT, 'module', 'mod_handler', 'mod_prefs.py'), encoding='utf-8') as f:
+    _prefs_src = f.read()
+with open(os.path.join(ROOT, 'module', 'mod_handler', 'mod_handler.py'), encoding='utf-8') as f:
+    _handler_src = f.read()
+check('mod_prefs.py: PIL 不可用时可降级导入（否则 GUI 里 import 就炸）',
+      'except ImportError' in _prefs_src and '_ModuleBaseStub' in _prefs_src)
+check('mod_handler.py: 同样有降级导入',
+      'except ImportError' in _handler_src and '_ModuleBaseStub' in _handler_src)
 check('app.py: 渲染计数写进日志，页面空白时可直接定位',
       'groups rendered' in app_src and 'nothing rendered' in app_src)
 

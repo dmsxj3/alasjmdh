@@ -21,9 +21,25 @@ ModHandler — 改版客户端（JMBQ / azurlan）悬浮窗倍率控制。
 import json
 import os
 
-from module.base.base import ModuleBase
 from module.config.deep import deep_get
 from module.logger import logger
+
+
+class _ModuleBaseStub:
+    """PIL 不可用时的降级基类，见下面的 import 说明。"""
+
+    def __init__(self, config=None, device=None, task=None):
+        self.config = config
+        self.device = device
+
+
+try:
+    # module/base/base.py 第 1 行 -> module.base.button -> `from PIL import ImageDraw`。
+    # webui 进程把 PIL 换成了假模块（只有 PIL.Image.Image），这里会 ImportError。
+    # read_only_describe_state 只需要下面这些纯函数，所以降级即可，不影响只读展示。
+    from module.base.base import ModuleBase
+except ImportError:  # pragma: no cover - 取决于运行环境
+    ModuleBase = _ModuleBaseStub
 
 # ---------------------------------------------------------------- 任务分组
 # 演习
