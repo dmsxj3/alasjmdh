@@ -99,80 +99,110 @@ def _adb_devices_static():
     return out
 
 
-class _StubDevice:
+def _format_pref_value(value):
+    """与 ModPrefs._format_value 一致。"""
+    if isinstance(value, bool):
+        return 'true' if value else 'false'
+    return str(value)
+
+
+def _match_prefs(parsed, target):
+    """parsed 是否完全等于 target（键与值都对上）。"""
+    if not target:
+        return False
+    for k, v in target.items():
+        cur = parsed.get(str(k))
+        if cur is None or str(cur[1]) != _format_pref_value(v):
+            return False
+    return True
+
+
+def _keys_detail(parsed, target):
+    parts = []
+    for k, v in target.items():
+        cur = parsed.get(str(k))
+        parts.append(f'{k}={cur[1] if cur else "(缺失)"}→目标{_format_pref_value(v)}')
+    return '  '.join(parts)
+
+
+def _candidate_serials(config, serial=None):
     """
-    站位用的哑设备。
+    候选设备列表：显式 serial -> 配置里的 serial -> adb devices 里所有在线设备。
 
-    ModuleBase.__init__ 在 device=None 时会去构造真正的 Device，
-    而 webui 进程里那会因假 PIL 崩掉（cannot import name 'ImageDraw'）。
-    这里用一个只实现 adb_shell 的哑对象把 device 位置占住，
-    使 ModPrefs 的只读路径可用。
+    为什么要逐个试：ALAS 的 Emulator_Serial 有时写成 'auto' 或用别名，
+    而 adb 里可能同时挂着真机与模拟器（真机通常没 root）。
     """
-
-    serial = 'readonly'
-
-    def adb_shell(self, cmd, timeout=30, **kwargs):
-        if isinstance(cmd, (list, tuple)):
-            cmd = ' '.join(str(c) for c in cmd)
-        cmd = str(cmd)
-        if cmd.startswith('su -c'):
-            inner = cmd[len('su -c'):].strip().strip("'").replace("'\\''", "'")
-            return _adb_su_static(inner, timeout=timeout)
-        return ''
-
-
-class _ReadOnlyConfig:
-    """
-    满足 ModPrefs 读取所需的最小配置接口（不碰 Device）。
-
-    接受两种输入：
-      - AzurLaneConfig 对象（用 .data / .config_name）
-      - 已合并的配置 dict（webui 的 read_file 返回的就是这个）
-    """
-
-    def __init__(self, config):
-        if isinstance(config, dict):
-            self._data = config
-            self.config_name = 'alas'
-        else:
-            self.config_name = getattr(config, 'config_name', 'alas')
-            self._data = config.data
-
-    @property
-    def data(self):
-        return self._data
-
-    def _get(self, key, default):
-        return deep_get(self._data, f'ModHandler.ModHandler.{key}', default=default)
-
-    @property
-    def package(self):
-        return str(self._get('PackageName', DEFAULT_PACKAGE) or DEFAULT_PACKAGE)
-
-    @property
-    def prefs_file(self):
-        return str(self._get('PrefsFile', DEFAULT_PREFS_FILE) or DEFAULT_PREFS_FILE)
-
-    @property
-    def off_keys(self):
-        from module.mod_handler.mod_handler import parse_key_values
-        return parse_key_values(self._get('OffKeys', ''))
-
-    @property
-    def on_keys(self):
-        from module.mod_handler.mod_handler import parse_key_values
-        return parse_key_values(self._get('OnKeys', ''))
+    out = []
+    if serial:
+        out.append(serial)
+    cfg_serial = str(deep_get(config, 'Alas.Emulator.Serial', default='') or '')
+    if cfg_serial and cfg_serial != 'auto':
+        out.append(cfg_serial)
+    seen = []
+    for item in out + _adb_devices_static():
+        if item not in seen:
+            seen.append(item)
+    return seen
 
 
 def describe_state_readonly(config, serial=None):
     """
-    不构造 Device、不 import PIL 地读取当前倍率状态，给 GUI 状态栏用。
+    纯只读地判断当前倍率状态，给 GUI 状态栏用。
 
+    刻意不实例化 ModPrefs（它是 ModuleBase 子类，__init__ 会做 OCR 导入、
+    构造 Device，在 webui 的假 PIL 环境下必然失败），只复用下面的纯逻辑。
+
+    Args:
+        config: AzurLaneConfig 对象，或 webui 的 read_file() 返回的配置 dict
     Returns:
         dict: {'option': 'on'/'off'/'unknown'/'unconfigured', 'detail': str}
     """
-    prefs = ModPrefs(config=_ReadOnlyConfig(config), device=_StubDevice())
-    return prefs.read_only_describe_state(serial=serial)
+    from module.mod_handler.mod_handler import parse_key_values
+
+    data = config if isinstance(config, dict) else config.data
+    package = str(deep_get(data, 'ModHandler.ModHandler.PackageName',
+                           default=DEFAULT_PACKAGE) or DEFAULT_PACKAGE)
+    prefs_file = str(deep_get(data, 'ModHandler.ModHandler.PrefsFile',
+                              default=DEFAULT_PREFS_FILE) or DEFAULT_PREFS_FILE)
+    off = parse_key_values(deep_get(data, 'ModHandler.ModHandler.OffKeys', default=''))
+    on = parse_key_values(deep_get(data, 'ModHandler.ModHandler.OnKeys', default=''))
+
+    if not off and not on:
+        return {'option': 'unconfigured',
+                'detail': 'OffKeys / OnKeys 未配置，请先用 dev_tools/mod_discover.py 发现 key 映射'}
+
+    remote = f'/data/data/{package}/shared_prefs/{prefs_file}.xml'
+    raw = None
+    tried = []
+    for candidate in _candidate_serials(data, serial):
+        tried.append(candidate)
+        try:
+            out = _adb_su_static(f'cat {remote}', serial=candidate)
+        except Exception as e:
+            logger.warning(f'ModPrefs: {candidate} 读取异常: {type(e).__name__}: {e}')
+            continue
+        if '<map' in out:
+            raw = out
+            break
+    if raw is None:
+        return {'option': 'unknown',
+                'detail': f'读不到 {remote}；已尝试设备 {tried}。'
+                          f'请确认模拟器在线、包名 / PrefsFile 是否正确'}
+
+    try:
+        parsed = ModPrefs.parse(raw)
+    except Exception as e:
+        return {'option': 'unknown', 'detail': f'解析失败: {e}'}
+
+    if off and _match_prefs(parsed, off):
+        return {'option': 'off', 'detail': _keys_detail(parsed, off)}
+    if on and _match_prefs(parsed, on):
+        return {'option': 'on', 'detail': _keys_detail(parsed, on)}
+    want = dict(off)
+    if on:
+        want.update(on)
+    return {'option': 'unknown',
+            'detail': '当前值不在任一目标状态上: ' + _keys_detail(parsed, want)}
 
 
 class ModPrefs(ModuleBase):

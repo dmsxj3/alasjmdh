@@ -505,6 +505,18 @@ check('mod_prefs.py: PIL 不可用时可降级导入（否则 GUI 里 import 就
       'except ImportError' in _prefs_src and '_ModuleBaseStub' in _prefs_src)
 check('mod_handler.py: 同样有降级导入',
       'except ImportError' in _handler_src and '_ModuleBaseStub' in _handler_src)
+
+# 防回归（真踩过）：GUI 状态栏走的 describe_state_readonly 不能实例化 ModPrefs。
+# ModPrefs 是 ModuleBase 子类，__init__ 会做 OCR 导入/构造 Device，
+# 在 webui 假 PIL 环境抛 AttributeError，被空 except 吞掉后显示成"读不到状态"。
+_without_body = _prefs_src.split('def describe_state_readonly(', 1)[-1]
+_factory_body = _without_body.split('\ndef ', 1)[0]
+# 只禁「实例化」：ModPrefs.parse(...) 是静态方法，允许
+check('describe_state_readonly 不实例化 ModPrefs（避开 ModuleBase.__init__）',
+      not any(l.strip().startswith('ModPrefs(') or l.strip().startswith('prefs = ModPrefs(')
+              for l in _factory_body.splitlines()))
+check('describe_state_readonly 不构造 Device',
+      'Device(' not in _factory_body)
 check('app.py: 渲染计数写进日志，页面空白时可直接定位',
       'groups rendered' in app_src and 'nothing rendered' in app_src)
 
