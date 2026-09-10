@@ -2207,7 +2207,7 @@
       "PrefsFile": "com.bilibili.azurlane_preferences",
       "OffKeys": null,
       "OnKeys": null,
-      "RestartTask": "sensitive_only",
+      "RestartTask": "always",
       "SensitiveTask": "disable_all_dangerous_task",
       "UiOpenPoint": null,
       "UiClosePoint": null,

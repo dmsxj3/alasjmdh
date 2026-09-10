@@ -171,8 +171,8 @@ dev.calls.clear()
 changed = h.check_then_set('main')
 check('第一个常规任务：写了一次并开启倍率',
       changed is True and dev.multiplier_on is True, f'writes={dev.writes}')
-check('常规任务恢复：只停游戏写配置，不强制重启（sensitive_only 策略）',
-      dev.writes == ['app_stop', f'adb_push:{TMP_REMOTE}'], str(dev.writes))
+check('常规任务恢复：停游戏 -> 推送 -> 重启（默认 always 策略）',
+      dev.writes == ['app_stop', f'adb_push:{TMP_REMOTE}', 'app_start'], str(dev.writes))
 
 for task in ['event_a', 'hard', 'daily', 'opsi_explore', 'guild', 'war_archives']:
     dev.calls.clear()

@@ -118,7 +118,7 @@ class FakeConfig:
             'OffKeys': '1=1,2=1,3=1',
             'OnKeys': '1=1000,2=1000,3=1000',
             'RestartGame': True,
-            'RestartTask': 'sensitive_only',
+            'RestartTask': 'always',
             'SensitiveTask': 'disable_all_dangerous_task',
             'UiOpenPoint': '',
             'UiClosePoint': '',

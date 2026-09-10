@@ -10386,7 +10386,7 @@
       },
       "RestartTask": {
         "type": "select",
-        "value": "sensitive_only",
+        "value": "always",
         "option": [
           "sensitive_only",
           "always",

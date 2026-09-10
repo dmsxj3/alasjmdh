@@ -113,7 +113,7 @@ eq('argument.yaml: ModHandler.SensitiveTask 默认',
    default_of(yaml_mod.get('SensitiveTask')), 'disable_all_dangerous_task')
 eq('argument.yaml: ModHandler.Backend 默认', default_of(yaml_mod.get('Backend')), 'prefs')
 eq('argument.yaml: ModHandler.RestartTask 默认',
-   default_of(yaml_mod.get('RestartTask')), 'sensitive_only')
+   default_of(yaml_mod.get('RestartTask')), 'always')
 
 with open(args_json, encoding='utf-8') as f:
     args = json.load(f)

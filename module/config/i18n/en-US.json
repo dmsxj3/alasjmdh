@@ -3243,9 +3243,9 @@
     },
     "RestartTask": {
       "name": "When to restart the game",
-      "help": "The game must be stopped before writing its preferences, otherwise the running instance overwrites the change when it exits. This option only controls whether it is started again right away.\n\nSensitive tasks only (recommended): restart immediately when the multiplier is turned off for Exercise / META / Raid so the change certainly takes effect; for other tasks just write the config and let Alas start the game when it needs to.\n\nAlways: restart on every change, so both on and off take effect at once.\n\nNever: only write the config. Changes apply on the next game restart, which may leave the multiplier on when you think it is off.",
-      "sensitive_only": "Sensitive tasks only (Exercise/META/Raid)",
-      "always": "Always restart (on and off apply at once)",
+      "help": "The game must be stopped before rewriting its preferences: the running instance keeps a copy in memory, so editing the file while it runs may take no effect and gets overwritten when the app exits. This option controls whether the game is started again right away.\n\nAlways restart (default): whenever the multiplier state actually changes, restart after writing. Alas tasks do not start the game themselves (they raise GameNotRunningError), so this is the only safe choice. Note it only restarts when the state really changes - if the state is already correct nothing happens.\n\nSensitive tasks only: restart when the multiplier is turned off for Exercise / META / Raid; for other tasks leave the game stopped and let the Alas Restart task bring it back.\n\nNever: only write the config. Changes apply on the next game restart, which may leave the multiplier on when you think it is off.",
+      "sensitive_only": "Sensitive tasks only (game stays stopped otherwise)",
+      "always": "Always restart (recommended)",
       "never": "Never restart (write config only)"
     },
     "SensitiveTask": {

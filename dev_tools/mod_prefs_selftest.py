@@ -180,15 +180,16 @@ eq('设备上 1/2/3 已回到 1000',
    (parse(dev.xml)['1'], parse(dev.xml)['2'], parse(dev.xml)['3']),
    (('int', '1000'), ('int', '1000'), ('int', '1000')))
 
-# 2.2b restart 缺省：按 RestartTask 策略。sensitive_only 下不重启
+# 2.2b restart 缺省：按 RestartTask 策略
+p, cfg, dev = make_prefs(RestartTask='always')
+dev.xml = build_xml(SAMPLE, {'1': 1000, '2': 1000, '3': 1000})
+p.set_multiplier(False)
+check('策略 always：自动重启', 'app_start' in dev.calls, str(dev.calls))
+
 p, cfg, dev = make_prefs(RestartTask='sensitive_only')
 dev.xml = build_xml(SAMPLE, {'1': 1000, '2': 1000, '3': 1000})
 p.set_multiplier(False)
-check('默认策略 sensitive_only：不自动重启', 'app_start' not in dev.calls, str(dev.calls))
-
-p, cfg, dev = make_prefs(RestartTask='always')
-p.set_multiplier(False)
-check('策略 always：自动重启', 'app_start' in dev.calls, str(dev.calls))
+check('策略 sensitive_only：不自动重启', 'app_start' not in dev.calls, str(dev.calls))
 
 # 2.3 幂等：设备已是目标状态时只读探测，不发生任何写动作
 p, cfg, dev = make_prefs()

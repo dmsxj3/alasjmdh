@@ -970,7 +970,7 @@ ModHandler:
   OffKeys: ''
   OnKeys: ''
   RestartTask:
-    value: sensitive_only
+    value: always
     option: [ sensitive_only, always, never ]
   SensitiveTask:
     value: disable_all_dangerous_task
