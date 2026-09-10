@@ -344,22 +344,36 @@ class AlasGUI(Frame):
 
         悬浮窗的开关存在游戏私有目录的 SharedPreferences 里，只有 root 能读；
         这里直读设备，所以页面上看到的是真实状态而不是缓存值。
-        这是本地 webui 功能，放在 module/webui 里，不改动 module/mod_handler 的独立性。
+
+        为什么要把假 PIL 换回真的：
+          webui 进程为了省内存把 PIL 换成了假模块（只有 PIL.Image.Image），
+          而读 prefs 需要构造 Device/Adb，其导入链会用到 PIL.ImageDraw。
+          不换回去就会 ImportError: cannot import name 'ImageDraw' from 'PIL'，
+          状态栏永远显示"读不到状态"。用完立刻还原，不影响 webui 的内存优化。
         """
         if task != "ModHandler":
             return
+
+        from module.webui.fake_pil_module import (  # noqa: E402
+            import_fake_pil_module, remove_fake_pil_module,
+        )
+
+        info = None
         try:
+            remove_fake_pil_module()
             from module.mod_handler.mod_handler import ModHandler
 
-            # 不带 device='skip'：只读状态需要真的连上模拟器去读 prefs
             handler = ModHandler(config=self.alas_config)
             info = handler.describe_state()
         except Exception as e:
             logger.warning(f"Failed to read modifier state: {e}")
             info = {"option": "unknown", "detail": f"读取失败: {e}"}
+        finally:
+            import_fake_pil_module()
 
         values = deep_get(config, ["ModHandler", "ModHandler"], default=None)
         if not isinstance(values, dict):
+            logger.warning("ModHandler config section missing, status bar not filled")
             return
         state = info.get("option", "unknown")
         values["CurrentState"] = {
@@ -367,6 +381,7 @@ class AlasGUI(Frame):
             "off": "icon_off",
             "unconfigured": "icon_unconfigured",
         }.get(state, "icon_unknown")
+        logger.info(f"ModHandler status bar: {values['CurrentState']} ({info.get('detail', '')})")
 
     def set_group(self, group, arg_dict, config, task):
         group_name = group[0]
