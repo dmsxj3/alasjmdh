@@ -287,6 +287,134 @@ def cmd_diff(args):
     return 0
 
 
+def _write_prefs(adb, package, prefs_file, new_xml):
+    """把改好的 XML 写回设备，并恢复属主/权限。"""
+    import tempfile
+    remote = prefs_path(package, prefs_file)
+    tmp = '/data/local/tmp/_alas_mod_discover.xml'
+    stat = adb.su(f'stat -c "%u %g %a" {remote}').strip()
+    m = re.match(r'(\d+)\s+(\d+)\s+(\d+)', stat)
+    uid, gid, mode = (m.group(1), m.group(2), m.group(3)) if m else ('', '', '660')
+    fd, local = tempfile.mkstemp(suffix='.xml', prefix='alas_discover_')
+    os.close(fd)
+    try:
+        with open(local, 'w', encoding='utf-8') as f:
+            f.write(new_xml)
+        out = adb.raw('push', local, tmp)
+        cmds = [f'cp {tmp} {remote}']
+        if uid:
+            cmds.append(f'chown {uid}:{gid} {remote}')
+        cmds.append(f'chmod {mode} {remote}')
+        cmds.append(f'restorecon {remote}')
+        adb.su(' && '.join(cmds) + f' ; rm -f {tmp}')
+        return True
+    finally:
+        try:
+            os.remove(local)
+        except OSError:
+            pass
+
+
+def cmd_set(args):
+    """
+    把某个 key 直接改成指定值，用来验证「这个编号到底控制哪个功能」。
+
+    流程：
+      1) 先 snapshot 备份（例如 snapshot probe）
+      2) set 35 false        ← 游戏重启后看「以德服人」是否真的关了
+      3) restore probe       ← 还原
+
+    注意：游戏运行中改文件可能无效、且会被内存副本覆盖，所以要先停游戏。
+    """
+    adb = Adb(args.serial)
+    xml, err = read_prefs(adb, args.package, args.prefs_file)
+    if xml is None:
+        print(f'[!] 读取失败: {err}')
+        return 1
+
+    from module.mod_handler.mod_prefs import ModPrefs
+    parsed = ModPrefs.parse(xml)
+    if str(args.key) not in parsed:
+        print(f'[!] prefs 里没有 key={args.key}。现有 key: {sorted(parsed)}')
+        return 1
+    old = parsed[str(args.key)]
+    value = args.value
+    if value.lower() in ('true', 'false'):
+        value = value.lower() == 'true'
+    else:
+        try:
+            value = int(value)
+        except ValueError:
+            pass
+
+    print(f'[i] key={args.key}: {old[1]!r} ({old[0]}) -> {value!r}')
+    pid = adb.shell(f'pidof {args.package}').strip()
+    if pid:
+        print('[i] 检测到游戏在运行，先停掉（否则写入会被内存副本覆盖）')
+        adb.shell(f'am force-stop {args.package}')
+        time.sleep(2)
+
+    new_xml = ModPrefs.build_xml(xml, {str(args.key): value})
+    if not _write_prefs(adb, args.package, args.prefs_file, new_xml):
+        print('[!] 写入失败')
+        return 1
+
+    check, _ = read_prefs(adb, args.package, args.prefs_file)
+    now = ModPrefs.parse(check).get(str(args.key)) if check else None
+    print(f'[+] 已写入，回读 key={args.key} = {now}')
+    print('\n下一步：启动游戏，打开悬浮窗看那个功能有没有真的变化。')
+    print(f'  - 变了   -> 这个 key({args.key}) 就是它，记下来填进 OffKeys/OnKeys')
+    print(f'  - 没变   -> 这个 key 不是它，换一个再试（或 restore 还原）')
+    print(f'  还原：toolkit\\python.exe {os.path.basename(__file__)} '
+          f'--serial {args.serial} restore <快照名>')
+    return 0
+
+
+def cmd_restore(args):
+    """用之前的快照还原 prefs（set 之后收尾用）。"""
+    adb = Adb(args.serial)
+    path = _snap_file(args.name)
+    if not os.path.exists(path):
+        print(f'[!] 快照不存在: {path}')
+        return 1
+    with open(path, 'r', encoding='utf-8') as f:
+        snap = json.load(f)
+
+    xml, err = read_prefs(adb, args.package, args.prefs_file)
+    if xml is None:
+        print(f'[!] 读取失败: {err}')
+        return 1
+
+    from module.mod_handler.mod_prefs import ModPrefs
+    parsed = ModPrefs.parse(xml)
+    restore = {}
+    for k, (t, v) in snap.items():
+        if str(k) not in parsed or str(parsed[str(k)][1]) != str(v):
+            if t == 'boolean':
+                restore[str(k)] = v == 'true'
+            elif t in ('int', 'long'):
+                restore[str(k)] = int(v)
+            elif t == 'float':
+                restore[str(k)] = float(v)
+            else:
+                continue
+    if not restore:
+        print('[i] 已经和快照一致，无需还原')
+        return 0
+
+    pid = adb.shell(f'pidof {args.package}').strip()
+    if pid:
+        print('[i] 先停游戏')
+        adb.shell(f'am force-stop {args.package}')
+        time.sleep(2)
+    new_xml = ModPrefs.build_xml(xml, restore)
+    if not _write_prefs(adb, args.package, args.prefs_file, new_xml):
+        print('[!] 还原失败')
+        return 1
+    print(f'[+] 已按快照 {args.name} 还原 {len(restore)} 项: {restore}')
+    return 0
+
+
 def main():
     # Windows 控制台默认不是 UTF-8，中文会乱码
     try:
@@ -311,6 +439,15 @@ def main():
     s2 = sub.add_parser('diff', help='与快照对比并给出 key 映射')
     s2.add_argument('name')
     s2.set_defaults(func=cmd_diff)
+
+    s3 = sub.add_parser('set', help='直接改某个 key（用来验证编号对应哪个功能）')
+    s3.add_argument('key', help='prefs 里的编号，例如 35')
+    s3.add_argument('value', help='目标值，例如 false / true / 1 / 1000')
+    s3.set_defaults(func=cmd_set)
+
+    s4 = sub.add_parser('restore', help='用快照还原 prefs（set 之后收尾）')
+    s4.add_argument('name')
+    s4.set_defaults(func=cmd_restore)
 
     args = ap.parse_args()
     sys.exit(args.func(args))

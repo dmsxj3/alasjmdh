@@ -306,16 +306,37 @@ check('连续三次 exercise 只在第一次动作',
       first is True and second is False and third is False
       and h._applied == [False], f'applied={h._applied}')
 
-# 4.2b 敏感任务必须要求重启（AlasGG 的 gg_reset 等价物），常规任务不强制
-h, cfg, dev = new_handler()
+# 4.2b 重启策略必须被三处调用点统一遵守。
+# 曾经在调用点硬编码 restart=True，导致 RestartTask=never 被无视
+# （用户设了"从不重启"却还是重启）。
+h, cfg, dev = new_handler(RestartTask='always')
 h.check_then_set('exercise')
-eq('敏感任务关倍率时要求重启', h._restarts, [True])
+eq('always: 敏感任务关倍率时重启', h._restarts, [True])
 h.check_then_set('main')
-eq('常规任务开倍率时不强制重启', h._restarts, [True, None])
+eq('always: 常规任务开倍率也重启', h._restarts, [True, True])
 h.check_then_set('opsi_ash_beacon')
-eq('META 任务也要求重启', h._restarts, [True, None, True])
+eq('always: META 任务也重启', h._restarts, [True, True, True])
 h.check_then_set('coalition')
-eq('共斗任务也要求重启（状态已关则不再动作）', h._restarts, [True, None, True])
+eq('状态已关时不动作，所以不追加', h._restarts, [True, True, True])
+
+h, cfg, dev = new_handler(RestartTask='never')
+h.check_then_set('exercise')
+eq('never: 敏感任务关倍率也不重启', h._restarts, [False])
+h.check_then_set('main')
+eq('never: 常规任务开倍率也不重启', h._restarts, [False, False])
+
+h, cfg, dev = new_handler(RestartTask='sensitive_only')
+h.check_then_set('exercise')
+eq('sensitive_only: 敏感任务关倍率时重启', h._restarts, [True])
+h.check_then_set('main')
+eq('sensitive_only: 常规任务开倍率不重启', h._restarts, [True, False])
+
+# 纠偏路径同样遵守策略
+h, cfg, dev = new_handler(RestartTask='never')
+h.set_state(False)
+h.read_backend_state = lambda: True
+h.check_on_startup()
+eq('never: 启动纠偏也不重启', h._restarts, [False])
 
 # 4.3 未列出任务沿用上次决定（共斗 -> commission -> main3 不能中途把倍率顶开）
 h, cfg, dev = new_handler()

@@ -419,6 +419,38 @@ class ModHandler(ModuleBase):
             logger.attr('ModHandler', f'repaired to {"ON" if mode else "OFF"}')
         return bool(result)
 
+    def _restart_for(self, mode: bool, sensitive: bool):
+        """
+        决定这次写入要不要立刻把游戏拉起来。
+
+        必须统一走这里，不能在调用点硬编码 True —— 否则
+        ModHandler.RestartTask = never / sensitive_only 会被无视，
+        表现为"设了不重启却还是重启"。
+
+        Args:
+            mode: 目标状态，True = 开倍率
+            sensitive: 当前是不是敏感任务
+        Returns:
+            True  -> 立刻重启
+            False -> 只停游戏、写入，启动交给 ALAS
+            None  -> 让后端按 RestartTask 策略自己判断
+        """
+        policy = self.restart_policy
+        if policy == 'never':
+            return False
+        if policy == 'always':
+            return True
+        # sensitive_only：敏感任务关倍率(关)时必须重启保证生效；
+        # 开倍率不赶时间，交给 ALAS 自己启动
+        if sensitive and not mode:
+            return True
+        return False
+
+    @property
+    def restart_policy(self):
+        return str(deep_get(self.config.data, 'ModHandler.ModHandler.RestartTask',
+                            default='always') or 'always')
+
     def set_multiplier(self, mode: bool, restart=None):
         """
         按配置的后端切换倍率。
@@ -495,7 +527,8 @@ class ModHandler(ModuleBase):
         # 倍率已关但以德服人还开着）。这时只补写缺的那几个键，
         # 不要把全部键重写一遍 —— 否则每个任务边界都要重启一次游戏。
         if not force:
-            repaired = self.repair_partial(want_on, restart=True if task in disabled else None)
+            repaired = self.repair_partial(
+                want_on, restart=self._restart_for(want_on, sensitive=task in disabled))
             if repaired:
                 self._last_want = want_on
                 self.set_state(want_on)
@@ -519,13 +552,14 @@ class ModHandler(ModuleBase):
         logger.hr('ModHandler', level=1)
 
         # 敏感任务 = 必须关闭倍率的任务。AlasGG 的 GGHandler 在这里会 gg_reset()，
-        # 也就是关掉 GG 并重启游戏，保证"关"一定生效；这里用同一个思路：
-        # 敏感任务强制重启，其他任务按 RestartTask 策略（默认不重启）。
+        # 也就是关掉 GG 并重启游戏，保证"关"一定生效。
+        # 重启与否统一由 _restart_for 按 ModHandler.RestartTask 决定。
         sensitive = task in disabled
-        restart = True if sensitive else None
+        restart = self._restart_for(want_on, sensitive=sensitive)
 
         if sensitive:
-            logger.warning(f'敏感任务 `{task}`：关闭倍率并重启游戏以确保生效')
+            logger.warning(f'敏感任务 `{task}`：'
+                           f'{"关闭倍率并重启游戏以确保生效" if restart else "关闭倍率"}')
         else:
             logger.info(f'Task `{task}` -> multiplier should be '
                         f'{"ON" if want_on else "OFF"} '
@@ -574,8 +608,9 @@ class ModHandler(ModuleBase):
         logger.hr('ModHandler', level=1)
         logger.warning(f'ModHandler: 悬浮窗倍率被外部改动（当前 {"ON" if current else "OFF"}，'
                        f'上次决定 {wanted}），按上次决定纠偏')
-        # 纠偏回「关」同样要重启才能生效（与敏感任务一致）；纠偏回「开」按策略
-        changed = self.set_multiplier(want_on, restart=True if not want_on else None)
+        # 纠偏也走 RestartTask 策略（纠偏回「关」按 sensitive_only 语义视为敏感）
+        restart = self._restart_for(want_on, sensitive=not want_on)
+        changed = self.set_multiplier(want_on, restart=restart)
         self.set_state(want_on)
         return changed
 
