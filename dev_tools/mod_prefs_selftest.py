@@ -344,7 +344,6 @@ eq('OffKeys/OnKeys 都没配 -> None', state_case(SAMPLE, OffKeys='', OnKeys='')
 # ---------------------------------------------------------------- 3b. describe_state（GUI 状态栏）
 checker.header('3b. describe_state 给 GUI 的状态描述')
 
-
 def describe_case(xml, **config_values):
     p, cfg, dev = make_prefs(**config_values)
     dev.xml = xml
@@ -395,6 +394,51 @@ eq('布尔开关：开着 -> True',
 eq('布尔开关：关着 -> False',
    state_case(BOOL_SAMPLE.replace('"true"', '"false"'),
               OffKeys='22=false,23=false', OnKeys='22=true,23=true'), False)
+
+# ---------------------------------------------------------------- 3c. 部分匹配时只补写缺失的键
+checker.header('3c. needs_repair / repair（用户手动拨过开关的中间状态）')
+
+_REPAIR_OFF = '1=1,2=1,3=1,22=false'
+_REPAIR_ON = '1=1000,2=1000,3=1000,22=true'
+_ALREADY_OFF = build_xml(SAMPLE, {'1': 1, '2': 1, '3': 1, '22': False})
+_ALREADY_ON = build_xml(SAMPLE, {'1': 1000, '2': 1000, '3': 1000, '22': True})
+# 中间态：倍率已经关了，但以德服人（22）还开着 —— 手动拨过开关就会出现
+_MIXED = build_xml(SAMPLE, {'1': 1, '2': 1, '3': 1, '22': True})
+# 陌生值：既不是目标值也不是另一个目标值，不该猜
+_WEIRD = build_xml(SAMPLE, {'1': 777, '2': 1, '3': 1, '22': False})
+
+
+def repair_case(xml, mode):
+    p, cfg, dev = make_prefs(OffKeys=_REPAIR_OFF, OnKeys=_REPAIR_ON)
+    dev.xml = xml
+    return p, dev
+
+
+def needs(xml, mode):
+    p, _ = repair_case(xml, mode)
+    return p.needs_repair(mode)
+
+
+eq('已经是 OFF -> 不需要补写', needs(_ALREADY_OFF, False), {})
+eq('已经是 ON  -> 不需要补写', needs(_ALREADY_ON, True), {})
+eq('中间态(以德服人还开着) -> 只补 22', needs(_MIXED, False), {'22': False})
+eq('中间态(倍率还关着) -> 只补 1/2/3',
+   needs(_MIXED, True), {'1': 1000, '2': 1000, '3': 1000})
+eq('陌生值 777 -> 不猜，返回空', needs(_WEIRD, False), {})
+
+_p, _dev = repair_case(_MIXED, False)
+_eq_repair = _p.repair(False, restart=False)
+check('repair 只改缺失的键并落盘', _eq_repair is True)
+_d = parse(_dev.xml)
+eq('repair 后 22 = false', _d['22'], ('boolean', 'false'))
+eq('repair 后 1 仍是 1（没被重写）', _d['1'], ('int', '1'))
+check('repair 时也停了游戏（否则写入会被覆盖）', 'app_stop' in _dev.calls, str(_dev.calls))
+
+_p, _dev = repair_case(_ALREADY_OFF, False)
+_dev.calls.clear()
+eq('已达成目标时 repair 不做任何事', _p.repair(False, restart=False), False)
+_writes = [c for c in _dev.calls if c.startswith(('app_stop', 'app_start', 'adb_push'))]
+eq('已达成目标时 repair 只读检测、不写不重启', _writes, [])
 
 # ---------------------------------------------------------------- 4. 诊断
 checker.header('4. diagnose')

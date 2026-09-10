@@ -506,6 +506,54 @@ class ModPrefs(ModuleBase):
                 pass
 
     # ------------------------------------------------------------ 对外
+    def needs_repair(self, mode: bool):
+        """
+        设备是否处于「部分匹配」的中间状态，需要补写剩下几个键。
+
+        为什么要这个：用户手动拨过悬浮窗开关时，可能只有一部分键落在目标值上
+        （例如倍率已经是 1、以德服人还是 true）。此时 get_state() 判不出状态，
+        老的逻辑就会在每个任务边界盲目重写全部键 + 重启一次，直到收敛。
+        这里先判断是不是"差一点"，是的话只写缺的那几个键。
+
+        保守起见：只有当目标键的值**都在** {当前值, 目标值} 之内、且**至少一个**
+        已经等于目标值时才认定需要补写。否则宁可当作"完全不符"，走完整的
+        停止->写入->重启流程（换一个完全不同的状态时确实需要重启）。
+
+        Returns:
+            list: 需要改写的 {key: value}；不需要补写时返回空 dict
+        """
+        changes = self.on_keys if mode else self.off_keys
+        if not changes:
+            return {}
+        current = self.read_raw()
+        if current is None:
+            return {}
+        try:
+            parsed = self.parse(current)
+        except Exception:
+            return {}
+        todo = {}
+        matched = 0
+        for k, v in changes.items():
+            cur = parsed.get(str(k))
+            if cur is None:
+                continue
+            cur_v = str(cur[1])
+            want_v = self._format_value(v)
+            if cur_v == want_v:
+                matched += 1
+                continue
+            # 当前值既不是目标值 —— 只有它看起来像"另一个目标值"时才敢补写
+            other = (self.off_keys if mode else self.on_keys).get(str(k))
+            if other is not None and cur_v == self._format_value(other):
+                todo[str(k)] = v
+            else:
+                # 完全陌生的值，不做猜测
+                return {}
+        if matched and todo:
+            return todo
+        return {}
+
     def set_multiplier(self, mode: bool, restart=None):
         """
         按策略把悬浮窗的倍率类开关写到目标值。
@@ -583,6 +631,58 @@ class ModPrefs(ModuleBase):
         if failed:
             return True
         self.verify_applied(mode)
+        return True
+
+    def repair(self, mode: bool, restart=None):
+        """
+        只补写缺失的键（不改动已经正确的键）。
+
+        与 set_multiplier 的区别：后者写的是完整的 OnKeys/OffKeys；
+        这里只写"差一点"的那几个，代价更小，但同样需要停游戏才能落盘。
+
+        Returns:
+            bool: 是否真的写入了
+        """
+        todo = self.needs_repair(mode)
+        if not todo:
+            return False
+        if not self.check_root():
+            raise RuntimeError(
+                'ModPrefs 需要 root，但 `su -c id` 未返回 uid=0。'
+                '请改用 ModHandler.Backend = ui，或在已 root 的模拟器上运行。')
+        current = self.read_raw()
+        if current is None:
+            raise RuntimeError(f'无法读取 {self.remote_path}，请确认包名/PrefsFile 是否正确。')
+
+        if restart is None:
+            restart = self.restart_policy == 'always'
+        logger.info(f'ModPrefs: repairing {todo} -> {"ON" if mode else "OFF"} '
+                    f'(restart={restart})')
+
+        was_running = self._is_game_running()
+        if was_running:
+            logger.info('ModPrefs: stopping game, otherwise the running instance '
+                        'overwrites our write when it exits')
+            self._app_stop()
+        failed = False
+        try:
+            self.write_raw(self.build_xml(current, todo))
+        except Exception:
+            failed = True
+            raise
+        finally:
+            if was_running and restart:
+                try:
+                    self._app_start()
+                except Exception as e:
+                    logger.error(f'ModPrefs: 重启游戏失败({e})，请检查 ALAS 的 Error.HandleError 配置')
+                    if not failed:
+                        raise
+            elif was_running and not failed:
+                logger.info('ModPrefs: game left stopped on purpose, '
+                            'ALAS will start it when the next task needs it')
+        if not failed:
+            self.verify_applied(mode)
         return True
 
     def verify_applied(self, mode: bool):

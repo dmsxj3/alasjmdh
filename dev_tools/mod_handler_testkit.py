@@ -209,11 +209,27 @@ class FakeDevice:
             return f'1234\n' if self.running else ''
         return ''
 
+    # xml：设备上 prefs 的内容。设了就支持只读路径（cat/stat/cp），
+    # 方便直接测 needs_repair / read_raw 这类不涉及停游戏逻辑的函数。
+    xml = None
+
     def _su(self, inner):
         if not self.root:
             return 'uid=1000(u0_a46) gid=1000(u0_a46)'
-        if inner.strip() == 'id':
+        inner = inner.strip()
+        if inner == 'id':
             return 'uid=0(root) gid=0(root)'
+        if self.xml is not None:
+            if inner.startswith('cat '):
+                return self.xml
+            if inner.startswith('stat '):
+                return '10046 10046 660'
+            if inner.startswith('cp '):
+                # cp <源> <目标> ...  —— pushed 是以源路径为 key 的
+                parts = inner.split()
+                src = parts[1] if len(parts) > 1 else ''
+                self.xml = self.pushed.get(src, self.xml)
+                return ''
         return ''
 
 

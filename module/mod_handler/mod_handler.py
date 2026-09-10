@@ -399,6 +399,26 @@ class ModHandler(ModuleBase):
             return self._last_want, 'session'
         return None, 'unknown'
 
+    def repair_partial(self, mode: bool, restart=None):
+        """
+        设备只有部分键落在目标值上时，只补写缺失的那些。
+
+        后端不支持（ui）或没有可补的键时返回 False，调用方走完整流程。
+
+        Returns:
+            bool: 是否真的补写了
+        """
+        try:
+            result = self._backend.repair(mode, restart=restart)
+        except TypeError:
+            return False
+        except Exception as e:
+            logger.warning(f'ModHandler: repair_partial failed: {e}')
+            return False
+        if result:
+            logger.attr('ModHandler', f'repaired to {"ON" if mode else "OFF"}')
+        return bool(result)
+
     def set_multiplier(self, mode: bool, restart=None):
         """
         按配置的后端切换倍率。
@@ -470,6 +490,16 @@ class ModHandler(ModuleBase):
             self._last_want = want_on
             logger.attr('ModHandler', f'{task}: multiplier already {"ON" if want_on else "OFF"}')
             return False
+
+        # 设备可能停在"部分匹配"的中间状态（用户手动拨过某个开关，例如
+        # 倍率已关但以德服人还开着）。这时只补写缺的那几个键，
+        # 不要把全部键重写一遍 —— 否则每个任务边界都要重启一次游戏。
+        if not force:
+            repaired = self.repair_partial(want_on, restart=True if task in disabled else None)
+            if repaired:
+                self._last_want = want_on
+                self.set_state(want_on)
+                return True
 
         # 没配 key 时后端无从下手。这里只跳过「写设备」，仍然记住本次决定，
         # 这样用户补上 key 之后策略立刻接得上，不会被中间任务弄乱。
