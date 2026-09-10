@@ -261,5 +261,37 @@ check('起始倍率关闭', dev.multiplier_on is False)
 changed = h.check_then_set('exercise')
 check('enable_all 时演习也开倍率', changed is True and dev.multiplier_on is True)
 
+# ---------------------------------------------------------------- 9
+checker.header('9. 跨月每日（opsi_cross_month）时序')
+# 该任务每月最后一天 23:50 触发，进入后 in-process 等到 00:00 的 OpSi 重置，
+# 期间一直待在同一个任务里（不重启、不退出任务），跑完再 task_stop()。
+# 属于常规任务，应当「开倍率」；任务内部的等待期我们不介入。
+h, cfg, dev = build('e2e_cross_month')
+dev.xml = ModPrefs.build_xml(dev.xml, {'1': 1, '2': 1, '3': 1, '22': False})
+check('前置：设备上倍率关闭（敏感任务刚跑完）', dev.multiplier_on is False)
+
+dev.calls.clear()
+changed = h.check_then_set('opsi_cross_month')
+check('跨月每日会把倍率打开（不在敏感项里）',
+      changed is True and dev.multiplier_on is True, f'writes={dev.writes}')
+
+# 任务内部等到 00:00 重置、继续跑每日/深渊/隐秘 —— 期间不会有新的任务边界，
+# 所以不会产生任何多余动作
+dev.calls.clear()
+inside = h.check_then_set('opsi_cross_month')
+check('任务等待期间不产生动作', inside is False and dev.writes == [], str(dev.writes))
+check('设备倍率保持开启', dev.multiplier_on is True)
+
+# 跑完 task_stop()，调度器继续下一个任务
+dev.calls.clear()
+changed = h.check_then_set('main2')
+check('跨月任务之后的常规任务不重复动作',
+      changed is False and dev.writes == [], str(dev.writes))
+
+dev.calls.clear()
+changed = h.check_then_set('exercise')
+check('紧接演习仍能正确关闭倍率',
+      changed is True and dev.multiplier_on is False, f'writes={dev.writes}')
+
 shutil.rmtree(STATE_TMP, ignore_errors=True)
 sys.exit(1 if checker.summary() else 0)
