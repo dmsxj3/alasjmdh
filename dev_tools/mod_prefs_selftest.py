@@ -18,7 +18,7 @@ import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from mod_handler_testkit import (  # noqa: E402
-    Checker, FakeConfig, FakeDevice, RequestHumanTakeover, install_stubs,
+    Checker, FakeConfig, FakeDevice, RequestHumanTakeover, install_stubs, login_calls,
 )
 
 install_stubs()
@@ -143,6 +143,34 @@ def make_prefs(**config_values):
     dev = ScriptedDevice()
     return ModPrefs(config=cfg, device=dev), cfg, dev
 
+
+# 2.1b 重启后必须等登录（否则 Alas 会对着加载界面截图，刷 Unknown ui page 然后崩）
+p, cfg, dev = make_prefs()
+dev.config = cfg                      # 模拟 alas.py 绑定好的 config
+login_calls.clear()
+p.set_multiplier(False, restart=True)
+eq('重启后调用了 handle_app_login 等登录', login_calls, ['handle_app_login'])
+check('等登录发生在 app_start 之后', 'app_start' in dev.calls, str(dev.calls))
+
+# 没有绑定 config 的裸设备（例如测试环境）应跳过登录，而不是崩
+p2, cfg2, dev2 = make_prefs()
+login_calls.clear()
+p2.set_multiplier(False, restart=True)
+eq('未绑定 config 时跳过登录处理', login_calls, [])
+
+# 登录抛异常不能把任务链打断
+_login_cls = sys.modules['module.handler.login'].LoginHandler
+_bad = type('BadLoginHandler', (_login_cls,), {
+    'handle_app_login': lambda self: (_ for _ in ()).throw(RuntimeError('login stuck')),
+})
+sys.modules['module.handler.login'].LoginHandler = _bad
+try:
+    p3, cfg3, dev3 = make_prefs()
+    dev3.config = cfg3
+    changed = p3.set_multiplier(False, restart=True)
+    check('登录失败时不抛异常、仍视为写入成功', changed is True)
+finally:
+    sys.modules['module.handler.login'].LoginHandler = _login_cls
 
 # 2.1 关倍率（restart=True，敏感任务的走法：停游戏 -> 写入 -> 立刻拉起来）
 p, cfg, dev = make_prefs()

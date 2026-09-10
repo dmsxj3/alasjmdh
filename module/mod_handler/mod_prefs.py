@@ -631,7 +631,18 @@ class ModPrefs(ModuleBase):
             self.device.adb_shell(['am', 'force-stop', self.package], timeout=15)
 
     def _app_start(self):
-        """启动游戏；同样绕开 Device.app_start 对 Error.HandleError 的依赖。"""
+        """
+        启动游戏，并等待登录完成。
+
+        关键：不能只调 device.app_start() —— 那只是把 App 拉起来，
+        不等登录。ALAS 紧接着接管时会对着加载界面截图，刷一堆
+        "Unknown ui page" 然后 "Game page unknown" 直接崩掉。
+        所以这里补上 ALAS 自己的登录处理 LoginHandler.handle_app_login()。
+
+        注意不用 alas.py 的 restart()/LoginHandler.app_restart()：
+        那个里面有 config.task_delay(server_update=True)，会把当前任务推迟到
+        下一次服务器刷新（可能几小时后）。我们要的是「原地重启后继续跑当前任务」。
+        """
         try:
             self.device.app_start()
         except RequestHumanTakeover as e:
@@ -639,6 +650,23 @@ class ModPrefs(ModuleBase):
             self.device.adb_shell(
                 ['monkey', '-p', self.package, '-c', 'android.intent.category.LAUNCHER', '1'],
                 timeout=30)
+            return
+
+        # device.config 由 alas.py 在每个任务前赋值（self.device.config = self.config）。
+        # 有它说明是 ALAS 主进程里的真实设备，可以走登录流程；
+        # 没有则退化为只启动（例如测试环境）。
+        if getattr(self.device, 'config', None) is None:
+            logger.info('ModPrefs: device has no config bound, skip login handling')
+            return
+        try:
+            from module.handler.login import LoginHandler
+
+            logger.info('ModPrefs: waiting for game login so Alas can continue safely')
+            LoginHandler(self.device.config, device=self.device).handle_app_login()
+        except Exception as e:
+            # 登录失败不能把整个任务链打断：交给 ALAS 的错误处理去重启
+            logger.error(f'ModPrefs: 登录等待失败({type(e).__name__}: {e})，'
+                         f'Alas 会在需要时自行重启游戏')
 
     def _match(self, parsed, target):
         """parsed 是否完全等于 target（键与值都对上）。"""
