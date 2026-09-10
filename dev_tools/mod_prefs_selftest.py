@@ -57,6 +57,7 @@ SAMPLE = """<?xml version='1.0' encoding='utf-8' standalone='yes' ?>
 """
 
 PREF_PATH = '/data/data/com.bilibili.azurlane/shared_prefs/com.bilibili.azurlane_preferences.xml'
+TMP_REMOTE = '/data/local/tmp/_alas_mod_prefs.xml'
 
 # ---------------------------------------------------------------- 1. XML
 checker.header('1. XML 解析与改写')
@@ -127,12 +128,14 @@ class ScriptedDevice(FakeDevice):
             return self.xml if self.xml is not None else ''
         if inner.startswith('stat '):
             return '10046 10046 660'
+        if inner.startswith('cp '):
+            # cp TMP PREF && chown ... ; rm -f TMP  —— 真正的落盘发生在这里
+            self.xml = self.pushed[TMP_REMOTE]
+            return ''
         return ''
 
     def adb_push(self, local, remote):
         super().adb_push(local, remote)
-        # 模拟 cp TMP -> prefs：设备上的内容随之变化
-        self.xml = self.pushed[remote]
 
 
 def make_prefs(**config_values):
@@ -141,9 +144,9 @@ def make_prefs(**config_values):
     return ModPrefs(config=cfg, device=dev), cfg, dev
 
 
-# 2.1 关倍率
+# 2.1 关倍率（restart=True，敏感任务的走法：停游戏 -> 写入 -> 立刻拉起来）
 p, cfg, dev = make_prefs()
-changed = p.set_multiplier(False)
+changed = p.set_multiplier(False, restart=True)
 check('关倍率返回 True', changed is True)
 eq('设备上 1/2/3 已被写成 1',
    (parse(dev.xml)['1'], parse(dev.xml)['2'], parse(dev.xml)['3']),
@@ -162,16 +165,36 @@ check('恢复属主与权限',
       and any('chmod 660' in c for c in dev.calls))
 check('清理临时文件', any('rm -f /data/local/tmp/_alas_mod_prefs.xml' in c for c in dev.calls))
 
+# 2.1b restart=False（普通任务）：只停游戏写配置，不拉起来
+p, cfg, dev = make_prefs()
+changed = p.set_multiplier(False, restart=False)
+check('restart=False 时仍然写入', changed is True)
+check('restart=False 时不自动启动游戏', 'app_start' not in dev.calls, str(dev.calls))
+check('restart=False 时确实停了游戏（否则写入会被覆盖）',
+      'app_stop' in dev.calls, str(dev.calls))
+
 # 2.2 再开回来
-changed = p.set_multiplier(True)
+changed = p.set_multiplier(True, restart=True)
 check('开倍率返回 True', changed is True)
 eq('设备上 1/2/3 已回到 1000',
    (parse(dev.xml)['1'], parse(dev.xml)['2'], parse(dev.xml)['3']),
    (('int', '1000'), ('int', '1000'), ('int', '1000')))
 
-# 2.3 幂等：仍是「已可读真实状态」的语义，此时只读探测、不发生任何写入动作
+# 2.2b restart 缺省：按 RestartTask 策略。sensitive_only 下不重启
+p, cfg, dev = make_prefs(RestartTask='sensitive_only')
+dev.xml = build_xml(SAMPLE, {'1': 1000, '2': 1000, '3': 1000})
+p.set_multiplier(False)
+check('默认策略 sensitive_only：不自动重启', 'app_start' not in dev.calls, str(dev.calls))
+
+p, cfg, dev = make_prefs(RestartTask='always')
+p.set_multiplier(False)
+check('策略 always：自动重启', 'app_start' in dev.calls, str(dev.calls))
+
+# 2.3 幂等：设备已是目标状态时只读探测，不发生任何写动作
+p, cfg, dev = make_prefs()
+dev.xml = build_xml(SAMPLE, {'1': 1, '2': 1, '3': 1})    # 设备上已经是「关」
 dev.calls.clear()
-changed = p.set_multiplier(True)
+changed = p.set_multiplier(False)
 check('已是目标状态时返回 False', changed is False)
 writes = [c for c in dev.calls if c.startswith(('app_stop', 'app_start', 'adb_push'))]
 eq('已是目标状态时不产生任何写动作', writes, [])
@@ -220,7 +243,7 @@ def boom(self, xml):
 
 ModPrefs.write_raw = boom
 try:
-    p.set_multiplier(False)
+    p.set_multiplier(False, restart=True)
     check('写入失败时向上抛异常', False, '没有抛异常')
 except RuntimeError as e:
     check('写入失败时向上抛异常', 'push failed' in str(e))
@@ -232,24 +255,29 @@ check('写入失败后仍然重启了游戏', 'app_start' in dev.calls, str(dev.
 p, cfg, dev = make_prefs()
 dev.raise_on_app_stop = RequestHumanTakeover('No app stop/start, because HandleError disabled')
 dev.raise_on_app_start = RequestHumanTakeover('No app stop/start, because HandleError disabled')
-changed = p.set_multiplier(False)
+changed = p.set_multiplier(False, restart=True)
 check('HandleError 关闭时仍完成关倍率', changed is True)
 check('退化为 am force-stop',
       any('am force-stop com.bilibili.azurlane' in c for c in dev.calls), str(dev.calls))
 check('退化为 monkey 启动',
       any('monkey -p com.bilibili.azurlane' in c for c in dev.calls), str(dev.calls))
 
-# 2.10 RestartGame=False
-p, cfg, dev = make_prefs(RestartGame=False)
-p.set_multiplier(False)
-check('RestartGame=False 时不自动开游戏', 'app_start' not in dev.calls, str(dev.calls))
-check('RestartGame=False 时仍然停了游戏', 'app_stop' in dev.calls)
+# 2.10 写入后回读校验
+p, cfg, dev = make_prefs()                       # 设备上倍率开着
+eq('verify_applied 与设备实际相符时返回 True', p.verify_applied(True), True)
+eq('verify_applied 与设备实际不符时返回 False', p.verify_applied(False), False)
+p, cfg, dev = make_prefs()
+dev.xml = build_xml(SAMPLE, {'1': 1, '2': 1, '3': 1})   # 设备上倍率关着
+eq('设备关着时 verify_applied(False) 返回 True', p.verify_applied(False), True)
+p, cfg, dev = make_prefs()
+dev.xml = build_xml(SAMPLE, {'1': 1})       # 半开半关 -> 读不到明确状态
+eq('verify_applied 读不到状态时返回 None', p.verify_applied(False), None)
 
 # 2.11 写入成功但重启失败：不能把异常吞掉
 p, cfg, dev = make_prefs()
 dev.raise_on_app_start = RuntimeError('monkey: inaccessible or not found')
 try:
-    p.set_multiplier(False)
+    p.set_multiplier(False, restart=True)
     check('重启失败时向上抛异常', False, '没有抛异常')
 except RuntimeError as e:
     check('重启失败时向上抛异常', 'monkey' in str(e), str(e))
@@ -260,7 +288,7 @@ dev.raise_on_app_start = RuntimeError('monkey: inaccessible or not found')
 original = ModPrefs.write_raw
 ModPrefs.write_raw = boom
 try:
-    p.set_multiplier(False)
+    p.set_multiplier(False, restart=True)
     check('写入与重启都失败时抛出写入异常', False, '没有抛异常')
 except RuntimeError as e:
     check('写入与重启都失败时抛出写入异常', 'push failed' in str(e), str(e))

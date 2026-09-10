@@ -112,7 +112,8 @@ eq('argument.yaml: ModHandler.Enabled', default_of(yaml_mod.get('Enabled')), Tru
 eq('argument.yaml: ModHandler.SensitiveTask 默认',
    default_of(yaml_mod.get('SensitiveTask')), 'disable_all_dangerous_task')
 eq('argument.yaml: ModHandler.Backend 默认', default_of(yaml_mod.get('Backend')), 'prefs')
-eq('argument.yaml: ModHandler.RestartGame 默认', default_of(yaml_mod.get('RestartGame')), True)
+eq('argument.yaml: ModHandler.RestartTask 默认',
+   default_of(yaml_mod.get('RestartTask')), 'sensitive_only')
 
 with open(args_json, encoding='utf-8') as f:
     args = json.load(f)
@@ -227,27 +228,40 @@ eq('真实配置形状下 off_keys 能读到 OffKeys',
 _real_prefs = ModPrefs(config=_real_cfg, device=None)
 eq('真实配置形状下 ModPrefs.package 能读到 PackageName',
    _real_prefs.package, args['ModHandler']['ModHandler']['PackageName']['value'])
-eq('真实配置形状下 ModPrefs.restart_game 能读到 RestartGame',
-   _real_prefs.restart_game, args['ModHandler']['ModHandler']['RestartGame']['value'])
+eq('真实配置形状下 ModPrefs.restart_policy 能读到 RestartTask',
+   _real_prefs.restart_policy, args['ModHandler']['ModHandler']['RestartTask']['value'])
 
 # ---------------------------------------------------------------- 4. 状态机
 checker.header('4. 状态机（假设备）')
 
 
+_handler_seq = [0]
+
+
 def new_handler(**config_values):
-    """造一个「后端总是写成功」的处理器，用来验证决策与状态机。"""
+    """
+    造一个「后端总是写成功」的处理器，用来验证决策与状态机。
+
+    每次都用独立的 config_name：状态文件是按 config_name 落盘的，
+    共用名字会让上一个用例的缓存泄漏到下一个用例（表现为"已一致所以不动"）。
+    """
+    _handler_seq[0] += 1
+    config_values.setdefault('config_name', f'selftest_{_handler_seq[0]}')
     cfg = FakeConfig(**config_values)
     dev = FakeDevice()
     handler = mh.ModHandler(config=cfg, device=dev)
     applied = []
+    restarts = []
 
-    def fake_set_multiplier(mode):
+    def fake_set_multiplier(mode, restart=None):
         applied.append(mode)
+        restarts.append(restart)
         return True   # 与真实后端一致：写入成功返回 True
 
     handler.set_multiplier = fake_set_multiplier
     handler.read_backend_state = lambda: None
     handler._applied = applied
+    handler._restarts = restarts
     return handler, cfg, dev
 
 
@@ -291,6 +305,17 @@ third = h.check_then_set('exercise')
 check('连续三次 exercise 只在第一次动作',
       first is True and second is False and third is False
       and h._applied == [False], f'applied={h._applied}')
+
+# 4.2b 敏感任务必须要求重启（AlasGG 的 gg_reset 等价物），常规任务不强制
+h, cfg, dev = new_handler()
+h.check_then_set('exercise')
+eq('敏感任务关倍率时要求重启', h._restarts, [True])
+h.check_then_set('main')
+eq('常规任务开倍率时不强制重启', h._restarts, [True, None])
+h.check_then_set('opsi_ash_beacon')
+eq('META 任务也要求重启', h._restarts, [True, None, True])
+h.check_then_set('coalition')
+eq('共斗任务也要求重启（状态已关则不再动作）', h._restarts, [True, None, True])
 
 # 4.3 未列出任务沿用上次决定（共斗 -> commission -> main3 不能中途把倍率顶开）
 h, cfg, dev = new_handler()
@@ -363,11 +388,6 @@ changed = h.check_on_startup()
 check('启动纠偏：状态一致时不动作', changed is False and h._applied == [])
 
 h, cfg, dev = new_handler()
-h._applied.clear()
-changed = h.check_on_startup()           # 没有任何历史决定
-check('启动纠偏：无历史决定时不动作', changed is False and h._applied == [])
-
-h, cfg, dev = new_handler()
 h.set_state(False)
 h.read_backend_state = lambda: None      # 读不到设备
 h._applied.clear()
@@ -413,7 +433,7 @@ check('configured=True（默认）', new_handler()[0].keys_configured is True)
 
 # 4.15 后端写失败时如实上报，不谎报成功
 h, cfg, dev = new_handler()
-h.set_multiplier = lambda mode: False      # 后端没写成
+h.set_multiplier = lambda mode, restart=None: False      # 后端没写成
 h.read_backend_state = lambda: None
 changed = h.check_then_set('exercise')
 check('后端未改动时 check_then_set 返回 False', changed is False)

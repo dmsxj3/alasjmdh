@@ -10,10 +10,16 @@ ModPrefs — 通过 root 直接读写改版客户端悬浮窗的 SharedPreferenc
     SharedPreferencesImpl.getInt <- com.android.support.Menu$1.run）。
   功能以数字 ID 作为 key（dex 内 DEFAULT_BOOLEAN_VALUE / DEFAULT_FLOAT_VALUE / DEFAULT_INT_VALUE）。
 
+实测补充（2026-09，MuMu 12 / 官服 JMBQ 改版）：
+  - 悬浮窗是 FLAG_NOT_FOCUSABLE 的 WindowManager 窗口，不在 uiautomator2 辅助功能树里，
+    所以点不到、也读不到它的控件；部分版本悬浮窗还会在数秒后自动消失。
+    结论：prefs 是唯一可行的控制通道。
+  - 应用对 prefs 有内存缓存，运行中改文件既可能不生效、又会在应用退出时被覆盖回去。
+    因此写入前必须先停游戏；要不要马上拉起来由 ModHandler.RestartTask 决定。
+
 注意事项：
   - 修改前必须停掉游戏进程，否则应用内存中的副本会在退出时覆盖我们的写入。
-  - 应用读取该配置的时机通常是启动/打开面板时，因此改完一般需要重启游戏才生效，
-    由配置项 ModHandler.RestartGame 控制（默认开启）。
+  - 写完会回读一次校验（verify_applied），避免"以为关了其实没关"。
   - key 映射通过 ModHandler.OffKeys / OnKeys 配置；用 dev_tools/mod_discover.py 自动发现。
 """
 import os
@@ -66,8 +72,17 @@ class ModPrefs(ModuleBase):
             deep_get(self.config.data, 'ModHandler.ModHandler.OnKeys', default=''))
 
     @property
-    def restart_game(self):
-        return bool(deep_get(self.config.data, 'ModHandler.ModHandler.RestartGame', default=True))
+    def restart_policy(self):
+        """
+        什么时候立刻重启游戏（游戏不在跑时不重启）。
+
+        sensitive_only : 只有敏感任务（演习 / META / 共斗）关倍率时立刻重启
+                         —— 保证"关"一定生效，等同 AlasGG 的 gg_reset()
+        always         : 只要改了配置就立刻重启，倍率开/关都马上生效
+        never          : 只停游戏、写配置，启动交给 ALAS 自己
+        """
+        return str(deep_get(self.config.data, 'ModHandler.ModHandler.RestartTask',
+                            default='sensitive_only') or 'sensitive_only')
 
     @property
     def remote_path(self):
@@ -180,11 +195,18 @@ class ModPrefs(ModuleBase):
                 pass
 
     # ------------------------------------------------------------ 对外
-    def set_multiplier(self, mode: bool):
+    def set_multiplier(self, mode: bool, restart=None):
         """
         按策略把悬浮窗的倍率类开关写到目标值。
+
         Args:
             mode: True = 启用倍率（恢复正常），False = 关闭倍率
+            restart: 写完之后要不要立刻把游戏拉起来
+                     None  -> 按 ModHandler.RestartTask 的策略判断
+                     True  -> 立刻重启（敏感任务，等同 AlasGG 的 gg_reset）
+                     False -> 只停游戏、写入，由 ALAS 自己决定何时启动
+        Returns:
+            bool: 是否真的改写了配置
         """
         changes = self.on_keys if mode else self.off_keys
         if not changes:
@@ -212,12 +234,17 @@ class ModPrefs(ModuleBase):
             logger.info(f'ModPrefs: already at target state ({changes}), skip')
             return False
 
-        logger.info(f'ModPrefs: applying {todo} -> {"ON" if mode else "OFF"}')
+        if restart is None:
+            restart = self.restart_policy == 'always'
 
-        # 必须停游戏，否则应用内存里的副本会在退出时覆盖我们的写入
+        logger.info(f'ModPrefs: applying {todo} -> {"ON" if mode else "OFF"} '
+                    f'(restart={restart})')
+
+        # 必须停游戏：应用内存里的副本会在退出时把我们的写入覆盖回去
         was_running = self._is_game_running()
         if was_running:
-            logger.info('ModPrefs: stopping game to apply prefs safely')
+            logger.info('ModPrefs: stopping game, otherwise the running instance '
+                        'overwrites our write when it exits')
             self._app_stop()
 
         failed = False
@@ -227,7 +254,7 @@ class ModPrefs(ModuleBase):
             failed = True
             raise
         finally:
-            if was_running and self.restart_game:
+            if was_running and restart:
                 logger.info('ModPrefs: restarting game so the mod re-reads prefs')
                 try:
                     self._app_start()
@@ -236,10 +263,39 @@ class ModPrefs(ModuleBase):
                     logger.error(f'ModPrefs: 重启游戏失败({e})，请检查 ALAS 的 Error.HandleError 配置')
                     if not failed:
                         raise
-            elif was_running:
-                logger.warning('ModPrefs: 已停游戏但 ModHandler.RestartGame 关闭，'
-                               '游戏需要手动重新启动才能重新读取配置')
+            elif was_running and not failed:
+                # 游戏保持关闭状态，让 ALAS 自己在需要时启动：
+                # 这样比"运行中改文件"安全 —— 否则应用退出时会把改动覆盖回去。
+                logger.info('ModPrefs: game left stopped on purpose, '
+                            'ALAS will start it when the next task needs it')
 
+        if failed:
+            return True
+        self.verify_applied(mode)
+        return True
+
+    def verify_applied(self, mode: bool):
+        """
+        写完回读一次，确认设备上的值真的是目标状态。
+
+        改配置文件这件事本身不会报错，所以必须自己回读验证 ——
+        否则"以为关了其实没关"就是封号风险的来源。
+        """
+        try:
+            state = self.get_state()
+        except Exception as e:
+            logger.warning(f'ModPrefs: 回读验证失败: {e}')
+            return None
+        want = bool(mode)
+        if state is None:
+            logger.warning('ModPrefs: 写入后回读不到明确状态，请用 '
+                           'dev_tools/mod_handler_doctor.py 检查 key 映射')
+            return None
+        if state != want:
+            logger.error(f'ModPrefs: 回读不一致！期望 {"ON" if want else "OFF"}，'
+                         f'实际 {"ON" if state else "OFF"}')
+            return False
+        logger.attr('ModPrefs', f'已确认倍率 {"ON" if want else "OFF"}')
         return True
 
     def _is_game_running(self):

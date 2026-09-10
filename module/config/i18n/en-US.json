@@ -3241,9 +3241,12 @@
       "name": "Values when turning ON",
       "help": "Key/value pairs written when restoring the multiplier, such as 1=1000,2=1000,3=1000.\nUsed together with OffKeys."
     },
-    "RestartGame": {
-      "name": "Restart game after writing",
-      "help": "The game process must be stopped first, otherwise its in-memory copy overwrites the file on exit.\nWhen on, the game is stopped before writing and started again afterwards so the overlay re-reads the config."
+    "RestartTask": {
+      "name": "When to restart the game",
+      "help": "The game must be stopped before writing its preferences, otherwise the running instance overwrites the change when it exits. This option only controls whether it is started again right away.\n\nSensitive tasks only (recommended): restart immediately when the multiplier is turned off for Exercise / META / Raid so the change certainly takes effect; for other tasks just write the config and let Alas start the game when it needs to.\n\nAlways: restart on every change, so both on and off take effect at once.\n\nNever: only write the config. Changes apply on the next game restart, which may leave the multiplier on when you think it is off.",
+      "sensitive_only": "Sensitive tasks only (Exercise/META/Raid)",
+      "always": "Always restart (on and off apply at once)",
+      "never": "Never restart (write config only)"
     },
     "SensitiveTask": {
       "name": "Tasks that disable the multiplier",

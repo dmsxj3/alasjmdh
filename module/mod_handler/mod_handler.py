@@ -383,13 +383,22 @@ class ModHandler(ModuleBase):
             return self._last_want, 'session'
         return None, 'unknown'
 
-    def set_multiplier(self, mode: bool):
+    def set_multiplier(self, mode: bool, restart=None):
         """
         按配置的后端切换倍率。
+
+        Args:
+            mode: True = 开倍率，False = 关倍率
+            restart: 仅 prefs 后端有意义。
+                     None -> 按 RestartTask 策略；True/False -> 强制
         Returns:
             bool: 后端是否真的做了改动（没配 key、或已是目标状态时为 False）
         """
-        result = self._backend.set_multiplier(mode)
+        try:
+            result = self._backend.set_multiplier(mode, restart=restart)
+        except TypeError:
+            # 老签名（或第三方后端）不接受 restart 参数
+            result = self._backend.set_multiplier(mode)
         if result:
             logger.attr('ModHandler', f'multiplier {"ON" if mode else "OFF"}')
         return bool(result)
@@ -462,10 +471,22 @@ class ModHandler(ModuleBase):
             return False
 
         logger.hr('ModHandler', level=1)
-        logger.info(f'Task `{task}` -> multiplier should be {"ON" if want_on else "OFF"} '
-                    f'(current: {"unknown" if current is None else ("ON" if current else "OFF")}'
-                    f'/{source})')
-        changed = self.set_multiplier(want_on)
+
+        # 敏感任务 = 必须关闭倍率的任务。AlasGG 的 GGHandler 在这里会 gg_reset()，
+        # 也就是关掉 GG 并重启游戏，保证"关"一定生效；这里用同一个思路：
+        # 敏感任务强制重启，其他任务按 RestartTask 策略（默认不重启）。
+        sensitive = task in disabled
+        restart = True if sensitive else None
+
+        if sensitive:
+            logger.warning(f'敏感任务 `{task}`：关闭倍率并重启游戏以确保生效')
+        else:
+            logger.info(f'Task `{task}` -> multiplier should be '
+                        f'{"ON" if want_on else "OFF"} '
+                        f'(current: {"unknown" if current is None else ("ON" if current else "OFF")}'
+                        f'/{source})')
+
+        changed = self.set_multiplier(want_on, restart=restart)
         if not changed:
             logger.warning(f'ModHandler: 后端没有改动任何开关（task `{task}`，'
                            f'target {"ON" if want_on else "OFF"}）')
@@ -507,7 +528,8 @@ class ModHandler(ModuleBase):
         logger.hr('ModHandler', level=1)
         logger.warning(f'ModHandler: 悬浮窗倍率被外部改动（当前 {"ON" if current else "OFF"}，'
                        f'上次决定 {wanted}），按上次决定纠偏')
-        changed = self.set_multiplier(want_on)
+        # 纠偏回「关」同样要重启才能生效（与敏感任务一致）；纠偏回「开」按策略
+        changed = self.set_multiplier(want_on, restart=True if not want_on else None)
         self.set_state(want_on)
         return changed
 

@@ -969,7 +969,9 @@ ModHandler:
   PrefsFile: com.bilibili.azurlane_preferences
   OffKeys: ''
   OnKeys: ''
-  RestartGame: true
+  RestartTask:
+    value: sensitive_only
+    option: [ sensitive_only, always, never ]
   SensitiveTask:
     value: disable_all_dangerous_task
     option: [

@@ -10384,9 +10384,14 @@
         "type": "input",
         "value": ""
       },
-      "RestartGame": {
-        "type": "checkbox",
-        "value": true
+      "RestartTask": {
+        "type": "select",
+        "value": "sensitive_only",
+        "option": [
+          "sensitive_only",
+          "always",
+          "never"
+        ]
       },
       "SensitiveTask": {
         "type": "select",
