@@ -3227,7 +3227,7 @@
     },
     "OffKeys": {
       "name": "倍率オフ時に書き込む値",
-      "help": "倍率を無効にするときに書き込むキーと値。例：1=1,2=1,3=1 または {\"1\":1,\"2\":1}。\ndev_tools/mod_discover.py で自動検出：snapshot → 手動で倍率をオフ → diff。"
+      "help": "倍率を無効にするときに書き込むキーと値。例：1=1,2=1,3=1（キーと値を二重引用符で囲んだ JSON 形式も可）。\ndev_tools/mod_discover.py で自動検出：snapshot → 手動で倍率をオフ → diff。"
     },
     "OnKeys": {
       "name": "倍率オン時に書き戻す値",

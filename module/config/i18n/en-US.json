@@ -3227,7 +3227,7 @@
     },
     "OffKeys": {
       "name": "Values when turning OFF",
-      "help": "Key/value pairs written when disabling the multiplier, such as 1=1,2=1,3=1 or {\"1\":1,\"2\":1}.\nDiscover them with dev_tools/mod_discover.py: snapshot, toggle the multiplier off manually, then diff."
+      "help": "Key/value pairs written when disabling the multiplier, such as 1=1,2=1,3=1 (a JSON object with quoted keys and values also works).\nDiscover them with dev_tools/mod_discover.py: snapshot, toggle the multiplier off manually, then diff."
     },
     "OnKeys": {
       "name": "Values when turning ON",

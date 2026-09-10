@@ -3227,7 +3227,7 @@
     },
     "OffKeys": {
       "name": "关闭倍率时写入",
-      "help": "关闭倍率时要写成的键值对，形如 1=1,2=1,3=1 或 {\"1\":1,\"2\":1}。\n用 dev_tools/mod_discover.py 自动发现：先 snapshot，手动关掉悬浮窗里的倍率，再 diff。"
+      "help": "关闭倍率时要写成的键值对，形如 1=1,2=1,3=1（也支持 JSON：键与值都加双引号）。\n用 dev_tools/mod_discover.py 自动发现：先 snapshot，手动关掉悬浮窗里的倍率，再 diff。"
     },
     "OnKeys": {
       "name": "启用倍率时写回",

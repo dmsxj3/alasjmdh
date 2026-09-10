@@ -176,6 +176,25 @@ for lang in ['zh-CN', 'en-US', 'ja-JP', 'zh-TW']:
           'ModHandler' in i18n.get('Task', {}),
           f'实际={i18n.get("Task", {}).get("ModHandler")}')
 
+    # 防回归：webui 的 lang.t() 会对文案调用 .format()，
+    # 文案里的单个 { } 会被当成占位符 → 打开配置页直接 KeyError('"1"')。
+    # 直接复现 app.py:397 的取值路径，逐条跑一遍 .format()。
+    _fmt_bad = []
+    for _key in ['_info'] + list(yaml_keys):
+        _entry = i18n.get('ModHandler', {}).get(_key)
+        if not isinstance(_entry, dict):
+            continue
+        for _field in ('name', 'help'):
+            _text = _entry.get(_field)
+            if not isinstance(_text, str):
+                continue
+            try:
+                _text.format()
+            except Exception as _e:
+                _fmt_bad.append(f'{_key}.{_field} -> {type(_e).__name__}: {_e}')
+    check(f'i18n {lang}: ModHandler 文案可安全 .format()（花括号已转义）',
+          not _fmt_bad, f'异常={_fmt_bad}')
+
 # 防回归：args.json 里每个叶子节点都必须是含 type/value 的 dict。
 # 曾经把 Storage 块少写一层嵌套，导致 GUI 打开配置页直接
 # TypeError: string indices must be integers。
