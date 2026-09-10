@@ -334,9 +334,17 @@ class AlasGUI(Frame):
 
         config = self.alas_config.read_file(self.alas_name)
         self.refresh_mod_handler_state(config, task)
+        rendered = 0
         for group, arg_dict in deep_iter(self.ALAS_ARGS[task], depth=1):
             if self.set_group(group, arg_dict, config, task):
                 self.set_navigator(group)
+                rendered += 1
+        # 渲染计数落日志：页面空白时能一眼看出是配置没读到还是没画出来
+        if rendered:
+            logger.info(f"Set group {task}: {rendered} groups rendered")
+        else:
+            logger.warning(f"Set group {task}: nothing rendered, "
+                           f"args={'ok' if self.ALAS_ARGS.get(task) else 'MISSING'}")
 
     def refresh_mod_handler_state(self, config, task: str) -> None:
         """

@@ -495,6 +495,8 @@ check('app.py: 状态读取失败时会写 warning 日志，便于定位',
       'Failed to read modifier state' in app_src)
 check('app.py: 读状态期间会临时还原真 PIL（否则 ImageDraw 导入失败）',
       'remove_fake_pil_module()' in app_src and 'import_fake_pil_module()' in app_src)
+check('app.py: 渲染计数写进日志，页面空白时可直接定位',
+      'groups rendered' in app_src and 'nothing rendered' in app_src)
 
 for mod in ['module.mod_handler.mod_handler', 'module.mod_handler.mod_prefs',
             'module.mod_handler.mod_ui']:
