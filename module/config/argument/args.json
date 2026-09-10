@@ -10346,6 +10346,16 @@
   },
   "ModHandler": {
     "ModHandler": {
+      "CurrentState": {
+        "type": "state",
+        "value": "icon_unknown",
+        "option": [
+          "icon_on",
+          "icon_off",
+          "icon_unknown",
+          "icon_unconfigured"
+        ]
+      },
       "Enabled": {
         "type": "checkbox",
         "value": true

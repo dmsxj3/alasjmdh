@@ -418,6 +418,20 @@ h.read_backend_state = lambda: None
 changed = h.check_then_set('exercise')
 check('后端未改动时 check_then_set 返回 False', changed is False)
 
+# 4.16 显式传入 device 时必须保留它（曾经被无条件覆盖成 None，
+#      导致所有 adb 操作都对 None 设备执行）
+_dev = FakeDevice()
+h = mh.ModHandler(config=FakeConfig(), device=_dev)
+check('显式 device 被保留', h.device is _dev, f'device={h.device}')
+check('显式 device 时 _device_free=False', h._device_free is False)
+
+# 4.17 device='skip' 时完全不碰设备
+h = mh.ModHandler(config=FakeConfig(), device='skip')
+check("device='skip' 时 _device_free=True", h._device_free is True)
+eq("device='skip' 时 describe_state 明确报告未绑定设备",
+   h.describe_state().get('option'), 'unknown')
+check("device='skip' 时 describe_state 不抛异常", isinstance(h.describe_state(), dict))
+
 # ---------------------------------------------------------------- 5. 关键值解析
 checker.header('5. OffKeys / OnKeys 解析')
 cases = [

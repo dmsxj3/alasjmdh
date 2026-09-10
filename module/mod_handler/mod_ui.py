@@ -282,6 +282,27 @@ class ModUi(ModuleBase):
         logger.warning(f'ModUi: 开关状态无法判定 {states}')
         return None
 
+    def describe_state(self):
+        """
+        给 GUI 用的「当前真实状态」描述（与 ModPrefs.describe_state 同构）。
+
+        注意：多数改版客户端的悬浮窗是 FLAG_NOT_FOCUSABLE 的 WindowManager 窗口，
+        不在辅助功能树里，此时这里会返回 unknown。
+        """
+        if not self.off_labels and not self.on_labels:
+            return {'option': 'unconfigured',
+                    'detail': 'UiOffLabels / UiOnLabels 未配置，ui 后端无从下手'}
+        try:
+            state = self.get_state()
+        except Exception as e:
+            return {'option': 'unknown', 'detail': f'读取失败: {e}'}
+        if state is True:
+            return {'option': 'on', 'detail': f'开关 {(self.on_labels or self.off_labels)} 均为「开」'}
+        if state is False:
+            return {'option': 'off', 'detail': f'开关 {self.off_labels} 均为「关」'}
+        return {'option': 'unknown',
+                'detail': '控件读不到（悬浮窗多半不在辅助功能树里），建议改用 prefs 后端'}
+
     def set_multiplier(self, mode: bool):
         labels = self.off_labels
         if mode and self.on_labels:

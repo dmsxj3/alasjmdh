@@ -3207,6 +3207,14 @@
       "name": "悬浮窗倍率控制",
       "help": "改版客户端（JMBQ / azurlan）悬浮窗的倍率等影响舰船属性功能，按任务自动开关。\n\n默认行为：META（余烬信标）、演习、共斗时自动关闭倍率，其他任务正常启用。\n敏感任务用倍率是封号高发区，建议保持默认。\n\n注意：改版客户端的悬浮窗是 Perseus 系菜单框架，开关状态存在 SharedPreferences 里，\n功能以数字 ID 作为 key，需要先用 dev_tools/mod_discover.py 发现映射并填到 OffKeys / OnKeys。"
     },
+    "CurrentState": {
+      "name": "当前倍率状态",
+      "help": "直读游戏悬浮窗配置得到的真实状态。打开本页时刷新一次。\n「开」= 倍率等功能已启用；「关」= 已关闭；\n「未知」= 设备无 root 或读不到配置；「未配置」= 还没填 OffKeys / OnKeys。",
+      "icon_on": "✔ 倍率已开启",
+      "icon_off": "✖ 倍率已关闭",
+      "icon_unknown": "？ 读不到状态",
+      "icon_unconfigured": "⚠ 尚未配置 OffKeys / OnKeys"
+    },
     "Enabled": {
       "name": "启用悬浮窗倍率控制",
       "help": "总开关。打开后 Alas 才会按任务自动开关倍率。\n关闭时本功能完全不影响游戏。"

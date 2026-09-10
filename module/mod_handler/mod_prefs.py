@@ -273,6 +273,60 @@ class ModPrefs(ModuleBase):
                 ['monkey', '-p', self.package, '-c', 'android.intent.category.LAUNCHER', '1'],
                 timeout=30)
 
+    def _match(self, parsed, target):
+        """parsed 是否完全等于 target（键与值都对上）。"""
+        if not target:
+            return False
+        for k, v in target.items():
+            cur = parsed.get(str(k))
+            if cur is None or str(cur[1]) != self._format_value(v):
+                return False
+        return True
+
+    def describe_state(self):
+        """
+        给 GUI 用的「当前真实状态」描述。
+
+        Returns:
+            dict: {
+                'option': 'on' / 'off' / 'unknown' / 'unconfigured',
+                'detail': 人类可读的细节（当前值 vs 目标值）,
+            }
+        """
+        off, on = self.off_keys, self.on_keys
+        if not off and not on:
+            return {'option': 'unconfigured',
+                    'detail': 'OffKeys / OnKeys 未配置，请先用 dev_tools/mod_discover.py 发现 key 映射'}
+        if not self.check_root():
+            return {'option': 'unknown', 'detail': '设备无 root，读不到悬浮窗配置'}
+        raw = self.read_raw()
+        if raw is None:
+            return {'option': 'unknown',
+                    'detail': f'读不到 {self.remote_path}，请确认包名 / PrefsFile'}
+        try:
+            parsed = self.parse(raw)
+        except Exception as e:
+            return {'option': 'unknown', 'detail': f'解析失败: {e}'}
+
+        want = dict(off)
+        if on:
+            want.update(on)
+
+        if off and self._match(parsed, off):
+            return {'option': 'off', 'detail': self._keys_detail(parsed, off)}
+        if on and self._match(parsed, on):
+            return {'option': 'on', 'detail': self._keys_detail(parsed, on)}
+        return {'option': 'unknown',
+                'detail': '开关当前值不在 OffKeys/OnKeys 任一目标状态上: '
+                          + self._keys_detail(parsed, want)}
+
+    def _keys_detail(self, parsed, target):
+        parts = []
+        for k, v in target.items():
+            cur = parsed.get(str(k))
+            parts.append(f'{k}={cur[1] if cur else "(缺失)"}→目标{self._format_value(v)}')
+        return '  '.join(parts)
+
     def get_state(self):
         """
         读取设备上真实的倍率开关状态。
@@ -292,19 +346,9 @@ class ModPrefs(ModuleBase):
             if raw is None:
                 return None
             parsed = self.parse(raw)
-
-            def match(target):
-                if not target:
-                    return False
-                for k, v in target.items():
-                    cur = parsed.get(str(k))
-                    if cur is None or str(cur[1]) != self._format_value(v):
-                        return False
-                return True
-
-            if off and match(off):
+            if off and self._match(parsed, off):
                 return False
-            if on and match(on):
+            if on and self._match(parsed, on):
                 return True
             return None
         except Exception as e:

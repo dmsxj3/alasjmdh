@@ -575,6 +575,7 @@ class GeneratedConfig:
     GameManager_AutoRestart = True
 
     # Group `ModHandler`
+    ModHandler_CurrentState = 'icon_unknown'  # icon_on, icon_off, icon_unknown, icon_unconfigured
     ModHandler_Enabled = True
     ModHandler_Backend = 'prefs'  # prefs, ui
     ModHandler_PackageName = 'com.bilibili.azurlane'

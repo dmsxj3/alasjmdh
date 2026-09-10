@@ -284,6 +284,40 @@ eq('用户手动改了一半 -> None',
    state_case(build_xml(SAMPLE, {'1': 1})), None)
 eq('OffKeys/OnKeys 都没配 -> None', state_case(SAMPLE, OffKeys='', OnKeys=''), None)
 
+# ---------------------------------------------------------------- 3b. describe_state（GUI 状态栏）
+checker.header('3b. describe_state 给 GUI 的状态描述')
+
+
+def describe_case(xml, **config_values):
+    p, cfg, dev = make_prefs(**config_values)
+    dev.xml = xml
+    return p.describe_state()
+
+
+_eq = describe_case(SAMPLE)
+eq('开着 -> option=on', _eq['option'], 'on')
+check('明细里带当前值与目标值', '1=1000' in _eq['detail'] and '目标1000' in _eq['detail'],
+      _eq['detail'])
+
+_eq = describe_case(build_xml(SAMPLE, {'1': 1, '2': 1, '3': 1}))
+eq('关着 -> option=off', _eq['option'], 'off')
+
+_eq = describe_case(build_xml(SAMPLE, {'1': 1}))
+eq('半开半关 -> option=unknown', _eq['option'], 'unknown')
+check('unknown 时明细提示不在目标状态', '不在' in _eq['detail'], _eq['detail'])
+
+_eq = describe_case(SAMPLE, OffKeys='', OnKeys='')
+eq('没配 key -> option=unconfigured', _eq['option'], 'unconfigured')
+check('unconfigured 时提示去跑 mod_discover', 'mod_discover' in _eq['detail'], _eq['detail'])
+
+p, cfg, dev = make_prefs()
+dev.root = False
+eq('非 root -> option=unknown', p.describe_state()['option'], 'unknown')
+
+p, cfg, dev = make_prefs()
+dev.xml = None
+eq('读不到 prefs -> option=unknown', p.describe_state()['option'], 'unknown')
+
 p, cfg, dev = make_prefs()
 dev.root = False
 eq('非 root -> None', p.get_state(), None)

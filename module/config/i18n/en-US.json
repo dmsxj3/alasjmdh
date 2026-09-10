@@ -3207,6 +3207,14 @@
       "name": "Floating menu multiplier control",
       "help": "Automatically toggles the multiplier and other ship-stat features of the modded client\n(JMBQ / azurlan) floating menu, depending on the task about to run.\n\nDefault: multiplier is turned OFF for META (dossier beacon), Exercise and Raid,\nand turned ON for every other task.\nUsing a multiplier in those sensitive modes is the most common cause of bans,\nso keeping the default is recommended.\n\nNote: the floating menu stores its switches in SharedPreferences, keyed by numeric IDs.\nUse dev_tools/mod_discover.py to discover the mapping and fill in OffKeys / OnKeys."
     },
+    "CurrentState": {
+      "name": "Current multiplier state",
+      "help": "Real state read straight from the game overlay config, refreshed when this page opens.\n\"On\" means the multiplier and other stat features are active, \"Off\" means disabled.\n\"Unknown\" means no root or the config cannot be read; \"Unconfigured\" means OffKeys / OnKeys are still empty.",
+      "icon_on": "ON - multiplier enabled",
+      "icon_off": "OFF - multiplier disabled",
+      "icon_unknown": "? cannot read state",
+      "icon_unconfigured": "! OffKeys / OnKeys not configured yet"
+    },
     "Enabled": {
       "name": "Enable multiplier control",
       "help": "Master switch. When on, Alas toggles the multiplier automatically per task.\nWhen off, this feature does not touch the game at all."

@@ -338,6 +338,36 @@ class AlasGUI(Frame):
                 self.set_navigator(group)
 
     @use_scope("groups")
+    def refresh_mod_handler_state(self, config, task: str) -> None:
+        """
+        打开「悬浮窗倍率控制」页面时，把设备上真实的倍率状态填进只读状态栏。
+
+        悬浮窗的开关存在游戏私有目录的 SharedPreferences 里，只有 root 能读；
+        这里直读设备，所以页面上看到的是真实状态而不是缓存值。
+        这是本地 webui 功能，放在 module/webui 里，不改动 module/mod_handler 的独立性。
+        """
+        if task != "ModHandler":
+            return
+        try:
+            from module.mod_handler.mod_handler import ModHandler
+
+            # 不带 device='skip'：只读状态需要真的连上模拟器去读 prefs
+            handler = ModHandler(config=self.alas_config)
+            info = handler.describe_state()
+        except Exception as e:
+            logger.warning(f"Failed to read modifier state: {e}")
+            info = {"option": "unknown", "detail": f"读取失败: {e}"}
+
+        values = deep_get(config, ["ModHandler", "ModHandler"], default=None)
+        if not isinstance(values, dict):
+            return
+        state = info.get("option", "unknown")
+        values["CurrentState"] = {
+            "on": "icon_on",
+            "off": "icon_off",
+            "unconfigured": "icon_unconfigured",
+        }.get(state, "icon_unknown")
+
     def set_group(self, group, arg_dict, config, task):
         group_name = group[0]
         server = to_server(deep_get(config, "Alas.Emulator.PackageName", "cn"))
@@ -881,6 +911,7 @@ class AlasGUI(Frame):
         )
 
         config = self.alas_config.read_file(self.alas_name)
+        self.refresh_mod_handler_state(config, task)
         for group, arg_dict in deep_iter(self.ALAS_ARGS[task], depth=1):
             if group[0] == "Storage":
                 continue

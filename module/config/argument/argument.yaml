@@ -956,6 +956,11 @@ AzurLaneUncensored:
 GameManager:
   AutoRestart: true
 ModHandler:
+  # 页面顶部的只读状态栏：由 module/webui/app.py 在打开本页时直读设备填入
+  CurrentState:
+    type: state
+    value: icon_unknown
+    option: [ icon_on, icon_off, icon_unknown, icon_unconfigured ]
   Enabled: true
   Backend:
     value: prefs

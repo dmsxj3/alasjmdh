@@ -2200,6 +2200,7 @@
   },
   "ModHandler": {
     "ModHandler": {
+      "CurrentState": "icon_unknown",
       "Enabled": true,
       "Backend": "prefs",
       "PackageName": "com.bilibili.azurlane",

@@ -250,7 +250,11 @@ class ModHandler(ModuleBase):
             self._device_free = False
         super().__init__(config=config, device=device)
         self.config = config
-        self.device = device
+        # 注意：device=None 时 ModuleBase 已经自动按 config 建好了 Device，
+        # 这里不能无条件覆盖，否则 self.device 会变成 None，
+        # 之后所有 adb 操作都会失败（ModPrefs: 'NoneType' has no attribute 'adb_shell'）。
+        if device is not None:
+            self.device = device
         self._backend_obj = None
         # 本次会话里最近一次「明确做出」的决定（与磁盘缓存互为补充）
         self._last_want = None
@@ -350,6 +354,20 @@ class ModHandler(ModuleBase):
         except Exception as e:
             logger.warning(f'ModHandler: read_backend_state failed: {e}')
             return None
+
+    def describe_state(self):
+        """
+        给 GUI 展示用的「当前真实倍率状态」，直读设备，不看本地缓存。
+
+        Returns:
+            dict: {'option': 'on'/'off'/'unknown'/'unconfigured', 'detail': str}
+        """
+        if self._device_free or self.device is None:
+            return {'option': 'unknown', 'detail': '未绑定设备（仅配置级诊断）'}
+        try:
+            return self._backend.describe_state()
+        except Exception as e:
+            return {'option': 'unknown', 'detail': f'读取失败: {type(e).__name__}: {e}'}
 
     def current_state(self):
         """
