@@ -421,32 +421,38 @@ class ModHandler(ModuleBase):
 
     def _restart_for(self, mode: bool, sensitive: bool):
         """
-        决定这次写入对游戏进程做什么。
+        决定这次写入对游戏进程做什么。必须统一走这里，不能在调用点硬编码 ——
+        否则 RestartTask 会被无视，表现为"设了不重启却还是重启"。
 
-        必须统一走这里，不能在调用点硬编码 —— 否则
-        ModHandler.RestartTask = never / sensitive_only 会被无视，
-        表现为"设了不重启却还是重启"。
+        三种结果的真实含义（2026-09-11 实测后定型）：
+            True  停游戏 -> 写文件 -> 立刻重启并等登录
+                  倍率这次就一定生效。代价是一次游戏重启。
+            False 停游戏 -> 写文件，启动交给 ALAS
+                  ALAS 下个任务发现游戏没运行会自己排 Restart，所以最终还是会重启
+                  一次，只是晚一点、并且和 ALAS 自己的重启合并。不会多出额外的重启。
+            'no_stop' 完全不动游戏，只写文件
+
+        关于 never：早期实现是"停游戏、不拉起来"，结果游戏一直关着，
+        ALAS 每个任务都 GameNotRunningError -> task_call('Restart')，
+        把重启推到了下一个任务边界，看起来就是"设了不重启反而重启更多"。
+        现在 never 直接不碰游戏进程：不停、不写坏、也不重启。
+        代价是游戏运行中读内存副本，这次改动要等它自然重启才生效 ——
+        配置页文案已写明。
 
         Args:
             mode: 目标状态，True = 开倍率
             sensitive: 当前是不是敏感任务
         Returns:
-            True            -> 停游戏 -> 写 -> 立刻重启并等登录
-            False           -> 停游戏 -> 写，启动交给 ALAS（它会自己排 Restart）
-            'no_stop'       -> 完全不动游戏，只写文件（见下面 never 的说明）
+            True / False / 'no_stop'
         """
         policy = self.restart_policy
         if policy == 'never':
-            # 注意：这条并不保证倍率变化生效。
-            #   游戏把 prefs 缓存在内存里，运行中改文件它读不到，而且退出时会
-            #   把改动覆盖回去。要让它生效必须让游戏重新加载配置，也就是必须重启。
-            #   "从不重启"因此只能理解为"不主动碰游戏进程"，
-            #   倍率变化要等下一次游戏自然重启才生效。
             return 'no_stop'
         if policy == 'always':
             return True
-        # sensitive_only：敏感任务关倍率(关)时必须重启保证生效；
-        # 开倍率不赶时间，交给 ALAS 自己启动
+        # sensitive_only：敏感任务关倍率(关)时必须立刻重启保证生效；
+        # 开倍率不赶时间 —— 停游戏写文件即可，让 ALAS 下次自己启动，
+        # 这样不会为了"开倍率"多出一次重启。
         if sensitive and not mode:
             return True
         return False

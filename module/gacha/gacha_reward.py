@@ -1,3 +1,5 @@
+import module.config.server as server
+
 from module.base.timer import Timer
 from module.campaign.campaign_status import OCR_COIN
 from module.combat.assets import GET_SHIP
@@ -12,6 +14,15 @@ from module.log_res.log_res import LogRes
 
 RECORD_GACHA_OPTION = ('RewardRecord', 'gacha')
 RECORD_GACHA_SINCE = (0,)
+# 不能直接用 import 来的 OCR_COIN —— 那是 module.campaign.assets 里的 Button。
+# 上游 campaign_status.py 会把它重新包装成 Digit，但那份包装被注释掉了，
+# 于是 gacha_run() 里会 AttributeError: 'Button' object has no attribute 'ocr'。
+# 这里自己包一个，别去动 campaign 模块的全局名字（那边 _get_num 还要用 Button）。
+OCR_COIN = Digit(
+    OCR_COIN, name='OCR_COIN',
+    letter=(201, 201, 201) if server.server == 'jp' else (239, 239, 239),
+    threshold=128,
+)
 OCR_BUILD_CUBE_COUNT = Digit(BUILD_CUBE_COUNT, letter=(255, 247, 247), threshold=64)
 OCR_BUILD_TICKET_COUNT = Digit(BUILD_TICKET_COUNT, letter=(255, 247, 247), threshold=64)
 OCR_BUILD_SUBMIT_COUNT = Digit(BUILD_SUBMIT_COUNT, letter=(255, 247, 247), threshold=64)
@@ -300,7 +311,7 @@ class RewardGacha(GachaUI, Retirement):
         # main Build page
         self.gacha_flush_queue()
 
-        # OCR Gold and Cubes
+        # OCR Gold and Cubes（OCR_COIN 已在模块顶部包成 Digit）
         self.build_coin_count = OCR_COIN.ocr(self.device.image)
         self.build_cube_count = OCR_BUILD_CUBE_COUNT.ocr(self.device.image)
 
