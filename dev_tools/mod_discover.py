@@ -26,8 +26,10 @@ mod_discover — 发现改版客户端悬浮窗开关对应的 SharedPreferences
 import argparse
 import json
 import os
+import re
 import subprocess
 import sys
+import time
 
 DEFAULT_PACKAGE = 'com.bilibili.azurlane'
 DEFAULT_PREFS_FILE = 'com.bilibili.azurlane_preferences'
