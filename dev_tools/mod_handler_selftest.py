@@ -479,6 +479,23 @@ check('钩子在 Start task 之前',
 check('钩子被 try/except 包住，失败不拖垮调度',
       'failed to apply multiplier policy' in alas_src)
 
+# 防回归：webui app.py 的结构。曾经因为编辑失误把 set_group 的
+# @use_scope("groups") 装饰器吃掉、同时丢掉 refresh_mod_handler_state 调用，
+# 结果「所有任务配置页全部空白」。这里用源码级断言盯住这两处。
+with open(os.path.join(ROOT, 'module', 'webui', 'app.py'), encoding='utf-8') as f:
+    app_src = f.read()
+check('app.py: set_group 仍带 @use_scope("groups") 装饰器',
+      '@use_scope("groups")\n    def set_group(' in app_src)
+check('app.py: alas_set_group 仍调用 refresh_mod_handler_state',
+      'self.refresh_mod_handler_state(config, task)' in app_src)
+_app_group_body = app_src.split('def alas_set_group(', 1)[-1].split('\n    def ', 1)[0]
+check('app.py: alas_set_group 里保留了参数组遍历（否则页面会空白）',
+      'deep_iter(self.ALAS_ARGS[task], depth=1)' in _app_group_body)
+check('app.py: 状态读取失败时会写 warning 日志，便于定位',
+      'Failed to read modifier state' in app_src)
+check('app.py: 读状态期间会临时还原真 PIL（否则 ImageDraw 导入失败）',
+      'remove_fake_pil_module()' in app_src and 'import_fake_pil_module()' in app_src)
+
 for mod in ['module.mod_handler.mod_handler', 'module.mod_handler.mod_prefs',
             'module.mod_handler.mod_ui']:
     try:

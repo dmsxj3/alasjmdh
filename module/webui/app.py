@@ -333,11 +333,11 @@ class AlasGUI(Frame):
             )
 
         config = self.alas_config.read_file(self.alas_name)
+        self.refresh_mod_handler_state(config, task)
         for group, arg_dict in deep_iter(self.ALAS_ARGS[task], depth=1):
             if self.set_group(group, arg_dict, config, task):
                 self.set_navigator(group)
 
-    @use_scope("groups")
     def refresh_mod_handler_state(self, config, task: str) -> None:
         """
         打开「悬浮窗倍率控制」页面时，把设备上真实的倍率状态填进只读状态栏。
@@ -383,6 +383,7 @@ class AlasGUI(Frame):
         }.get(state, "icon_unknown")
         logger.info(f"ModHandler status bar: {values['CurrentState']} ({info.get('detail', '')})")
 
+    @use_scope("groups")
     def set_group(self, group, arg_dict, config, task):
         group_name = group[0]
         server = to_server(deep_get(config, "Alas.Emulator.PackageName", "cn"))
