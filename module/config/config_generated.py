@@ -574,5 +574,21 @@ class GeneratedConfig:
     # Group `GameManager`
     GameManager_AutoRestart = True
 
+    # Group `ModHandler`
+    ModHandler_Enabled = True
+    ModHandler_Backend = 'prefs'  # prefs, ui
+    ModHandler_PackageName = 'com.bilibili.azurlane'
+    ModHandler_PrefsFile = 'com.bilibili.azurlane_preferences'
+    ModHandler_OffKeys = None
+    ModHandler_OnKeys = None
+    ModHandler_RestartGame = True
+    ModHandler_SensitiveTask = 'disable_all_dangerous_task'  # disable_all_dangerous_task, disable_guild_and_dangerous, disable_meta_and_exercise, disable_exercise, enable_all
+    ModHandler_UiOpenPoint = None
+    ModHandler_UiClosePoint = None
+    ModHandler_UiOffLabels = None
+    ModHandler_UiOnLabels = None
+    ModHandler_UiTapPoints = None
+    ModHandler_UiWaitTimeout = 5
+
     # Group `Storage`
     Storage_Storage = {}

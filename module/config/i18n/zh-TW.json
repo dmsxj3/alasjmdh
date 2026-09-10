@@ -3194,6 +3194,75 @@
       "help": "遊戲被強制結束後自動登錄遊戲"
     }
   },
+  "ModHandler": {
+    "_info": {
+      "name": "懸浮窗倍率控制",
+      "help": "改版客戶端（JMBQ / azurlan）懸浮窗的倍率等影響艦船屬性功能，依任務自動開關。\n\n預設行為：META（餘燼信標）、演習、共鬥時自動關閉倍率，其他任務正常啟用。\n敏感任務使用倍率是封號高發區，建議維持預設值。\n\n注意：改版客戶端的懸浮窗是 Perseus 系選單框架，開關狀態存在 SharedPreferences 裡，\n功能以數字 ID 作為 key，需先用 dev_tools/mod_discover.py 找出對應並填入 OffKeys / OnKeys。"
+    },
+    "Enabled": {
+      "name": "啟用懸浮窗倍率控制",
+      "help": "總開關。開啟後 Alas 才會依任務自動開關倍率。\n關閉時本功能完全不影響遊戲。"
+    },
+    "Backend": {
+      "name": "控制方式",
+      "help": "prefs：透過 root 直接改懸浮窗的 SharedPreferences，最穩定，需要裝置已 root（MuMu 預設可用）。\nui：用 uiautomator2 點懸浮窗開關，不需要 root，但懸浮窗若不在輔助功能樹裡會失敗。",
+      "prefs": "改設定檔（需 root）",
+      "ui": "點懸浮窗（免 root）"
+    },
+    "PackageName": {
+      "name": "遊戲套件名稱",
+      "help": "預設 com.bilibili.azurlane（B服）。其他伺服器請填對應套件名稱。"
+    },
+    "PrefsFile": {
+      "name": "設定檔名稱",
+      "help": "懸浮窗存放開關的 SharedPreferences 檔名（不含 .xml）。\n預設 com.bilibili.azurlane_preferences。"
+    },
+    "OffKeys": {
+      "name": "關閉倍率時寫入",
+      "help": "關閉倍率時要寫入的鍵值對，形如 1=1,2=1,3=1 或 {\"1\":1,\"2\":1}。\n用 dev_tools/mod_discover.py 自動找出：先 snapshot，手動關掉懸浮窗裡的倍率，再 diff。"
+    },
+    "OnKeys": {
+      "name": "啟用倍率時寫回",
+      "help": "恢復倍率時寫回的鍵值對，形如 1=1000,2=1000,3=1000。\n與 OffKeys 成對使用。"
+    },
+    "RestartGame": {
+      "name": "改完重啟遊戲",
+      "help": "改設定檔需要先停掉遊戲程序，否則記憶體中的副本會覆蓋寫入。\n開啟後會在寫入前強制關閉、寫入後重新啟動遊戲，讓懸浮窗重新讀取設定。"
+    },
+    "SensitiveTask": {
+      "name": "停用倍率的任務範圍",
+      "help": "敏感項目 = 共鬥 / META / 演習，使用倍率的封號風險最高。\n預設「僅關敏感項」即需求所要求：META、演習、共鬥關倍率，其他任務正常啟用。",
+      "disable_all_dangerous_task": "僅關敏感項（共鬥/META/演習）",
+      "disable_guild_and_dangerous": "敏感項 + 大艦隊",
+      "disable_meta_and_exercise": "僅關 META 與演習",
+      "disable_exercise": "僅關演習",
+      "enable_all": "百無禁忌（全開）"
+    },
+    "UiOpenPoint": {
+      "name": "開啟懸浮窗的座標",
+      "help": "ui 方式專用：點此座標展開懸浮窗，形如 960,540。\n留空表示懸浮窗已展開。"
+    },
+    "UiClosePoint": {
+      "name": "關閉懸浮窗的座標",
+      "help": "ui 方式專用：操作完成後點此座標收起懸浮窗，形如 960,540。留空則不收起。"
+    },
+    "UiOffLabels": {
+      "name": "要關閉的開關文字",
+      "help": "ui 方式專用：要設為「關」的開關文字，以逗號分隔。\n例如：倍攻倍防,艦船裝填倍率"
+    },
+    "UiOnLabels": {
+      "name": "要開啟的開關文字",
+      "help": "ui 方式專用：恢復時設為「開」的開關文字，以逗號分隔。留空則沿用上面的清單。"
+    },
+    "UiTapPoints": {
+      "name": "座標備援",
+      "help": "ui 方式專用：找不到控制項時依座標點擊，形如 倍攻倍防=120,300;艦船裝填倍率=120,360"
+    },
+    "UiWaitTimeout": {
+      "name": "控制項等待逾時(秒)",
+      "help": "ui 方式專用：等待控制項出現的秒數，裝置慢就調大。"
+    }
+  },
   "Storage": {
     "_info": {
       "name": "任務狀態",

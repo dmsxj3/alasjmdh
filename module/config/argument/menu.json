@@ -118,7 +118,8 @@
       "IslandProductionPlanner",
       "Benchmark",
       "AzurLaneUncensored",
-      "GameManager"
+      "GameManager",
+      "ModHandler"
     ]
   }
 }

@@ -10266,6 +10266,75 @@
         "value": true
       }
     },
+    "ModHandler": {
+      "Enabled": {
+        "type": "checkbox",
+        "value": true
+      },
+      "Backend": {
+        "type": "select",
+        "value": "prefs",
+        "option": [
+          "prefs",
+          "ui"
+        ]
+      },
+      "PackageName": {
+        "type": "input",
+        "value": "com.bilibili.azurlane"
+      },
+      "PrefsFile": {
+        "type": "input",
+        "value": "com.bilibili.azurlane_preferences"
+      },
+      "OffKeys": {
+        "type": "input",
+        "value": ""
+      },
+      "OnKeys": {
+        "type": "input",
+        "value": ""
+      },
+      "RestartGame": {
+        "type": "checkbox",
+        "value": true
+      },
+      "SensitiveTask": {
+        "type": "select",
+        "value": "disable_all_dangerous_task",
+        "option": [
+          "disable_all_dangerous_task",
+          "disable_guild_and_dangerous",
+          "disable_meta_and_exercise",
+          "disable_exercise",
+          "enable_all"
+        ]
+      },
+      "UiOpenPoint": {
+        "type": "input",
+        "value": ""
+      },
+      "UiClosePoint": {
+        "type": "input",
+        "value": ""
+      },
+      "UiOffLabels": {
+        "type": "input",
+        "value": ""
+      },
+      "UiOnLabels": {
+        "type": "input",
+        "value": ""
+      },
+      "UiTapPoints": {
+        "type": "input",
+        "value": ""
+      },
+      "UiWaitTimeout": {
+        "type": "input",
+        "value": 5
+      }
+    },
     "Storage": {
       "Storage": {
         "type": "storage",

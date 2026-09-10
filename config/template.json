@@ -2178,6 +2178,22 @@
     "GameManager": {
       "AutoRestart": true
     },
+    "ModHandler": {
+      "Enabled": true,
+      "Backend": "prefs",
+      "PackageName": "com.bilibili.azurlane",
+      "PrefsFile": "com.bilibili.azurlane_preferences",
+      "OffKeys": null,
+      "OnKeys": null,
+      "RestartGame": true,
+      "SensitiveTask": "disable_all_dangerous_task",
+      "UiOpenPoint": null,
+      "UiClosePoint": null,
+      "UiOffLabels": null,
+      "UiOnLabels": null,
+      "UiTapPoints": null,
+      "UiWaitTimeout": 5
+    },
     "Storage": {
       "Storage": {}
     }

@@ -955,3 +955,28 @@ AzurLaneUncensored:
     display: disabled
 GameManager:
   AutoRestart: true
+ModHandler:
+  Enabled: true
+  Backend:
+    value: prefs
+    option: [ prefs, ui ]
+  PackageName: com.bilibili.azurlane
+  PrefsFile: com.bilibili.azurlane_preferences
+  OffKeys: ''
+  OnKeys: ''
+  RestartGame: true
+  SensitiveTask:
+    value: disable_all_dangerous_task
+    option: [
+      disable_all_dangerous_task,
+      disable_guild_and_dangerous,
+      disable_meta_and_exercise,
+      disable_exercise,
+      enable_all,
+    ]
+  UiOpenPoint: ''
+  UiClosePoint: ''
+  UiOffLabels: ''
+  UiOnLabels: ''
+  UiTapPoints: ''
+  UiWaitTimeout: 5
