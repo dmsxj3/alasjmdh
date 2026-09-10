@@ -77,11 +77,11 @@ class ModPrefs(ModuleBase):
         什么时候立刻重启游戏（游戏本来就没跑时不重启）。
 
         always         : 只要改了配置就立刻重启（默认）
-                         —— ALAS 的任务在游戏没运行时不会自己拉起来
-                         （module/ui/ui.py 直接抛 GameNotRunningError），
-                         所以写完必须把游戏恢复到运行状态。
         sensitive_only : 只有敏感任务（演习 / META / 共斗）关倍率时立刻重启；
-                         其他任务写完就把游戏留在停止状态，靠 ALAS 的 Restart 任务恢复。
+                         其他任务写完把游戏留在停止状态 ——
+                         ALAS 会把 GameNotRunningError 转成 Restart 任务
+                         （alas.py 的 run(): self.config.task_call('Restart')），
+                         所以游戏会被自己拉起来。
         never          : 只停游戏、写配置，启动完全交给 ALAS。
         """
         return str(deep_get(self.config.data, 'ModHandler.ModHandler.RestartTask',

@@ -93,6 +93,9 @@ def main():
     ap.add_argument('--package', default=None, help='游戏包名，缺省读 ALAS 配置')
     ap.add_argument('--prefs-file', default=None, help='prefs 文件名（不含 .xml），缺省读 ALAS 配置')
     ap.add_argument('--offline', action='store_true', help='只看 ALAS 配置，不连设备')
+    ap.add_argument('--apply', action='store_true',
+                    help='把检测到的倍率候选键（值为 1000 的滑条）写进 ALAS 配置的 '
+                         'OffKeys/OnKeys；配置里已有的其它 key 会保留')
     args = ap.parse_args()
 
     print('=' * 78)
@@ -139,9 +142,10 @@ def main():
     prefs_file = args.prefs_file or DEFAULT_PREFS
     if config is not None:
         from module.config.deep import deep_get
-        package = args.package or deep_get(config.data, 'ModHandler.PackageName',
+        # 注意是两层：config.data['ModHandler']['ModHandler'][<参数>]
+        package = args.package or deep_get(config.data, 'ModHandler.ModHandler.PackageName',
                                            default=DEFAULT_PACKAGE) or DEFAULT_PACKAGE
-        prefs_file = args.prefs_file or deep_get(config.data, 'ModHandler.PrefsFile',
+        prefs_file = args.prefs_file or deep_get(config.data, 'ModHandler.ModHandler.PrefsFile',
                                                  default=DEFAULT_PREFS) or DEFAULT_PREFS
 
     if args.offline:
@@ -207,12 +211,45 @@ def main():
                   key=lambda kv: int(kv[0]) if kv[0].lstrip('-').isdigit() else 9999)
     bools = sorted([(k, v) for k, v in data.items() if v[0] == 'boolean'],
                    key=lambda kv: int(kv[0]) if kv[0].lstrip('-').isdigit() else 9999)
-    print('\n  数值型（倍率类最可能是这些，值是 1 通常代表「关闭/无加成」）:')
+    print('\n  数值型（倍率滑条就是这些，拉满通常是 1000）:')
     for k, (t, v) in ints:
         print(f'    {k:>6} = {v:<8} ({t})')
     print('\n  布尔型（功能开关）:')
     for k, (t, v) in bools:
         print(f'    {k:>6} = {v}')
+
+    # 倍率候选：值等于 1000（滑条拉满）的数值项
+    mult_candidates = [k for k, (t, v) in ints if v == '1000']
+    if mult_candidates:
+        print(f'\n  [i] 倍率候选（值为 1000，对应拉满的滑条）: {mult_candidates}')
+        print(f'      可直接填 OffKeys = {",".join(k + "=1" for k in mult_candidates)}'
+              f'   OnKeys = {",".join(k + "=1000" for k in mult_candidates)}')
+
+    if args.apply and mult_candidates and config is not None:
+        from module.config.deep import deep_get
+        from module.mod_handler.mod_handler import parse_key_values
+        cur_off = parse_key_values(
+            deep_get(config.data, 'ModHandler.ModHandler.OffKeys', default=''))
+        cur_on = parse_key_values(
+            deep_get(config.data, 'ModHandler.ModHandler.OnKeys', default=''))
+        for k in mult_candidates:
+            cur_off[str(k)] = 1
+            cur_on[str(k)] = 1000
+        new_off = ','.join(f'{k}={v}' for k, v in cur_off.items())
+        new_on = ','.join(f'{k}={v}' for k, v in cur_on.items())
+
+        path = os.path.join(ROOT, 'config', f'{name}.json')
+        with open(path, encoding='utf-8') as f:
+            data_cfg = json.load(f)
+        data_cfg.setdefault('ModHandler', {}).setdefault('ModHandler', {})
+        data_cfg['ModHandler']['ModHandler']['OffKeys'] = new_off
+        data_cfg['ModHandler']['ModHandler']['OnKeys'] = new_on
+        with open(path, 'w', encoding='utf-8') as f:
+            json.dump(data_cfg, f, ensure_ascii=False, indent=2)
+        print(f'\n  [+] 已写入 {path}')
+        print(f'      OffKeys = {new_off}')
+        print(f'      OnKeys  = {new_on}')
+        print('      （若 ALAS 正在运行，需要重启才读到新配置）')
 
     # ---------------------------------------------------------- 5. key 校验
     print('\n[5] OffKeys / OnKeys 校验')
@@ -221,8 +258,9 @@ def main():
         return 0
     from module.mod_handler.mod_handler import parse_key_values
     from module.config.deep import deep_get
-    off = parse_key_values(deep_get(config.data, 'ModHandler.OffKeys', default=''))
-    on = parse_key_values(deep_get(config.data, 'ModHandler.OnKeys', default=''))
+    # 两层：config.data['ModHandler']['ModHandler'][<参数>]
+    off = parse_key_values(deep_get(config.data, 'ModHandler.ModHandler.OffKeys', default=''))
+    on = parse_key_values(deep_get(config.data, 'ModHandler.ModHandler.OnKeys', default=''))
     if not off and not on:
         print('  OffKeys / OnKeys 均为空 —— 功能不会生效。')
         print('  下一步：')
@@ -232,6 +270,21 @@ def main():
         print('    3) 跑 diff，把输出的 OffKeys / OnKeys 填进 ALAS 配置：')
         print(f'       toolkit\\python.exe dev_tools/mod_discover.py --serial {serial} diff baseline')
         return 0
+
+    # 布尔开关（例：以德服人）无法从数值推断，只提示怎么发现
+    known = set(str(k) for k in list(off) + list(on))
+    unknown_bools = [k for k, _ in bools if str(k) not in known]
+    if unknown_bools:
+        print(f'\n  [i] 还有 {len(unknown_bools)} 个布尔开关没纳入控制（例：以德服人）。')
+        print('      它们无法从数值推断，用快照对比法确定：')
+        print(f'        1) toolkit\\python.exe dev_tools/mod_discover.py --serial {serial} '
+              f'snapshot yide')
+        print('        2) 在悬浮窗「常用」页把「以德服人」拨一下，退出悬浮窗让它落盘')
+        print(f'        3) toolkit\\python.exe dev_tools/mod_discover.py --serial {serial} '
+              f'diff yide')
+        print('      输出的 CHANGED 行就是它的 key，再按')
+        print('        OffKeys 追加 <key>=false   OnKeys 追加 <key>=true')
+        print('      加进配置。不添加也不影响倍率开关本身。')
 
     ok = True
     for label, mapping in (('OffKeys', off), ('OnKeys', on)):
