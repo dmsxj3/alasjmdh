@@ -255,3 +255,11 @@ console.bat
 
 # Pylance configuration file
 pyrightconfig.json
+
+### 本地工作产物（不要提交）
+# 悬浮窗倍率控制的运行状态
+config/mod_handler/
+# 批量改动前的备份目录，避免误 git add -A 把整个 .git 提交进去
+.git_corrupt_bak_*/
+_modhandler_bak/
+_alas_wip_backup_*/
