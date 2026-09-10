@@ -1,3 +1,9 @@
+# alasjmdh
+
+本项目基于 [Alas-with-Dashboard](https://github.com/Zuosizhu/Alas-with-Dashboard) 修改而来，感谢原作者 zuosizhu 的杰出工作。
+
+本项目在 zuosizhu 的基础上，合并了上游 [LmeSzinc/AzurLaneAutoScript](https://github.com/LmeSzinc/AzurLaneAutoScript) 的最新更新（截至 2026-09-09），以保证游戏适配持续可用。
+
 相比于源库增加了仪表盘
 
 提供了一个较为实用的仪表盘，感谢@MengNianxiaoyao 作出的美观调整
