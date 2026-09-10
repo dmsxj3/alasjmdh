@@ -99,6 +99,29 @@ def _adb_devices_static():
     return out
 
 
+def _adb_connect_static(serial):
+    """
+    设备没在线就 adb connect 一次。
+
+    模拟器掉线很常见（重启模拟器 / adb server 被别的工具重启），
+    不重连的话表现是"读不到状态"，很难懂。
+    """
+    import subprocess
+
+    if not serial or serial in _adb_devices_static():
+        return True
+    try:
+        result = subprocess.run([_find_adb_static(), 'connect', serial],
+                                capture_output=True, timeout=30)
+    except Exception as e:
+        logger.warning(f'ModPrefs: adb connect {serial} 失败: {e}')
+        return False
+    msg = result.stdout.decode('utf-8', 'replace').strip()
+    if msg:
+        logger.info(f'ModPrefs: {msg}')
+    return serial in _adb_devices_static()
+
+
 def _format_pref_value(value):
     """与 ModPrefs._format_value 一致。"""
     if isinstance(value, bool):
@@ -176,6 +199,8 @@ def describe_state_readonly(config, serial=None):
     tried = []
     for candidate in _candidate_serials(data, serial):
         tried.append(candidate)
+        # 掉线时先尝试重连一次，否则会静默读不到
+        _adb_connect_static(candidate)
         try:
             out = _adb_su_static(f'cat {remote}', serial=candidate)
         except Exception as e:

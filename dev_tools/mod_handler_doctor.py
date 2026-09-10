@@ -49,6 +49,32 @@ class Adb:
     def __init__(self, serial):
         self.adb = find_adb()
         self.serial = serial
+        self._ensure_connected()
+
+    def _online_devices(self):
+        try:
+            r = subprocess.run([self.adb, 'devices'], capture_output=True, timeout=20)
+        except Exception:
+            return []
+        out = []
+        for line in r.stdout.decode('utf-8', 'replace').splitlines()[1:]:
+            parts = line.split()
+            if len(parts) >= 2 and parts[1] == 'device':
+                out.append(parts[0])
+        return out
+
+    def _ensure_connected(self):
+        """设备掉线时自动 adb connect 一次，否则后面只会看到空错误。"""
+        if not self.serial or self.serial in self._online_devices():
+            return
+        try:
+            r = subprocess.run([self.adb, 'connect', self.serial],
+                               capture_output=True, timeout=30)
+            msg = r.stdout.decode('utf-8', 'replace').strip()
+            if msg:
+                print(f'  [i] {msg}')
+        except Exception as e:
+            print(f'  [i] adb connect {self.serial} 失败: {e}')
 
     def raw(self, *args, timeout=30):
         cmd = [self.adb]
@@ -57,7 +83,11 @@ class Adb:
         cmd += list(args)
         try:
             r = subprocess.run(cmd, capture_output=True, timeout=timeout)
-            return r.stdout.decode('utf-8', 'replace')
+            out = r.stdout.decode('utf-8', 'replace')
+            err = r.stderr.decode('utf-8', 'replace').strip()
+            if err and not out:
+                return f'__ERROR__ {err}'
+            return out
         except Exception as e:
             return f'__ERROR__ {e}'
 

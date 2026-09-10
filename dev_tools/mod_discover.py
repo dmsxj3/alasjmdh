@@ -52,6 +52,38 @@ class Adb:
     def __init__(self, serial):
         self.adb = find_adb()
         self.serial = serial
+        self._ensure_connected()
+
+    def _online_devices(self):
+        try:
+            r = subprocess.run([self.adb, 'devices'], capture_output=True, timeout=20)
+        except Exception:
+            return []
+        out = []
+        for line in r.stdout.decode('utf-8', 'replace').splitlines()[1:]:
+            parts = line.split()
+            # 只认状态为 device 的（unauthorized / offline 不算）
+            if len(parts) >= 2 and parts[1] == 'device':
+                out.append(parts[0])
+        return out
+
+    def _ensure_connected(self):
+        """
+        设备没在线就自动 adb connect 一次。
+
+        模拟器掉线很常见（重启模拟器、adb server 被别的工具重启等），
+        不自动重连的话表现是「读取失败: 」（后面什么都没有），很难懂。
+        """
+        if not self.serial or self.serial in self._online_devices():
+            return
+        try:
+            r = subprocess.run([self.adb, 'connect', self.serial],
+                               capture_output=True, timeout=30)
+            msg = r.stdout.decode('utf-8', 'replace').strip()
+            if msg:
+                print(f'[i] {msg}')
+        except Exception as e:
+            print(f'[i] adb connect {self.serial} 失败: {e}')
 
     def raw(self, *args, timeout=30):
         cmd = [self.adb]
@@ -60,7 +92,12 @@ class Adb:
         cmd += list(args)
         try:
             r = subprocess.run(cmd, capture_output=True, timeout=timeout)
-            return r.stdout.decode('utf-8', 'replace')
+            out = r.stdout.decode('utf-8', 'replace')
+            err = r.stderr.decode('utf-8', 'replace').strip()
+            if err and not out:
+                # 把 adb 的报错带出来，否则只会看到「读取失败: 」
+                return f'__ERROR__ {err}'
+            return out
         except Exception as e:
             return f'__ERROR__ {e}'
 
@@ -89,9 +126,18 @@ def parse_prefs(xml_text):
 
 
 def read_prefs(adb, package, prefs_file):
-    out = adb.su(f'cat {prefs_path(package, prefs_file)}')
-    if '__ERROR__' in out or '<map' not in out:
+    path = prefs_path(package, prefs_file)
+    out = adb.su(f'cat {path}')
+    if '__ERROR__' in out:
         return None, out
+    if '<map' not in out:
+        # 空输出 / 只有报错时，把最可能的原因一并说明，别只留一个冒号
+        hint = (f'读取 {path} 返回了非 prefs 内容: {out.strip()[:200]!r}\n'
+                f'    可能原因：\n'
+                f'      1) 设备掉线 —— 先 `adb connect {adb.serial}`（本工具会尝试自动重连）\n'
+                f'      2) 该包名没装改版客户端，或包名 / PrefsFile 不对\n'
+                f'      3) su 不可用（设备没 root）')
+        return None, hint
     return out, None
 
 
