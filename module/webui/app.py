@@ -362,7 +362,15 @@ class AlasGUI(Frame):
 
         info = None
         try:
+            from module.config.deep import deep_get as _deep_get
             from module.mod_handler.mod_prefs import describe_state_readonly
+
+            # 诊断用：把「GUI 认为当前是哪个实例」和「读到的 key」一并落日志。
+            # 页面显示"尚未配置"时，这一行能直接区分是选错实例还是配置真的为空。
+            _raw_off = _deep_get(config, ["ModHandler", "ModHandler", "OffKeys"], default=None)
+            _raw_on = _deep_get(config, ["ModHandler", "ModHandler", "OnKeys"], default=None)
+            logger.info(f"ModHandler read: instance={self.alas_name!r} mod={self.alas_mod!r} "
+                        f"OffKeys={_raw_off!r} OnKeys={_raw_on!r}")
 
             info = describe_state_readonly(config)
             serial = deep_get(config, ["Alas", "Emulator", "Serial"], default=None)
