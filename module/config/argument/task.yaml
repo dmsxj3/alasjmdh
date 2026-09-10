@@ -371,4 +371,5 @@ Tool:
       - AzurLaneUncensored
     GameManager:
       - GameManager
+    ModHandler:
       - ModHandler

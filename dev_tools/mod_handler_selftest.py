@@ -114,14 +114,37 @@ eq('argument.yaml: ModHandler.RestartGame 默认', default_of(yaml_mod.get('Rest
 
 with open(args_json, encoding='utf-8') as f:
     args = json.load(f)
-eq('args.json: GameManager.ModHandler.Enabled',
-   args['GameManager']['ModHandler']['Enabled']['value'], True)
+
+# ModHandler 必须是 args.json 里的「独立任务」，否则 GUI 点工具页的按钮会 KeyError
+check('args.json: ModHandler 是独立任务', 'ModHandler' in args,
+      f'顶层任务={sorted(args.keys())[-4:]}')
+eq('args.json: ModHandler 任务含 ModHandler 参数组',
+   sorted(args.get('ModHandler', {}).keys()), ['ModHandler', 'Storage'])
+eq('args.json: ModHandler.Enabled 默认',
+   args['ModHandler']['ModHandler']['Enabled']['value'], True)
 eq('args.json: SensitiveTask 默认',
-   args['GameManager']['ModHandler']['SensitiveTask']['value'], 'disable_all_dangerous_task')
+   args['ModHandler']['ModHandler']['SensitiveTask']['value'], 'disable_all_dangerous_task')
 eq('args.json: SensitiveTask 选项',
-   args['GameManager']['ModHandler']['SensitiveTask']['option'],
+   args['ModHandler']['ModHandler']['SensitiveTask']['option'],
    ['disable_all_dangerous_task', 'disable_guild_and_dangerous',
     'disable_meta_and_exercise', 'disable_exercise', 'enable_all'])
+
+# 复现 module/webui/app.py:884 的遍历路径：守护总览点「设置」时走的就是这里
+from module.config.deep import deep_iter as _deep_iter
+_iter_ok = True
+try:
+    _groups = [g[0] for g, _ in _deep_iter(args['ModHandler'], depth=1) if g[0] != 'Storage']
+except KeyError:
+    _iter_ok = False
+    _groups = []
+check('GUI 守护总览能遍历 args["ModHandler"]（不再 KeyError）', _iter_ok, f'groups={_groups}')
+
+# 菜单页签里必须有它，否则工具页看不到入口
+with open(os.path.join(ROOT, 'module', 'config', 'argument', 'menu.json'),
+          encoding='utf-8') as f:
+    _menu = json.load(f)
+check('menu.json 工具页含 ModHandler',
+      'ModHandler' in _menu['Tool']['tasks'], str(_menu['Tool']['tasks']))
 
 with open(gen_py, encoding='utf-8') as f:
     gen_src = f.read()
@@ -130,14 +153,14 @@ check('config_generated.py: ModHandler_Backend 存在', 'ModHandler_Backend' in 
 
 with open(tpl_json, encoding='utf-8') as f:
     tpl = json.load(f)
-eq('template.json: ModHandler.Enabled', tpl['GameManager']['ModHandler']['Enabled'], True)
+eq('template.json: ModHandler.Enabled', tpl['ModHandler']['ModHandler']['Enabled'], True)
 
 # 每一条 ModHandler 参数都要在四个地方齐全，避免 GUI 出现 KeyError
 yaml_keys = set(yaml_mod.keys())
-args_keys = set(args['GameManager']['ModHandler'].keys())
+args_keys = set(args['ModHandler']['ModHandler'].keys())
 check('args.json 与 argument.yaml 参数集合一致', yaml_keys == args_keys,
       f'仅yaml={sorted(yaml_keys - args_keys)} 仅args={sorted(args_keys - yaml_keys)}')
-tpl_keys = set(tpl['GameManager']['ModHandler'].keys())
+tpl_keys = set(tpl['ModHandler']['ModHandler'].keys())
 check('template.json 与 argument.yaml 参数集合一致', yaml_keys == tpl_keys,
       f'差异={sorted(yaml_keys ^ tpl_keys)}')
 
@@ -146,7 +169,18 @@ for lang in ['zh-CN', 'en-US', 'ja-JP', 'zh-TW']:
     with open(path, encoding='utf-8') as f:
         i18n = json.load(f)
     missing = sorted(yaml_keys - set(i18n.get('ModHandler', {}).keys()))
-    check(f'i18n {lang}: ModHandler 条目齐全', not missing, f'缺失={missing}')
+    check(f'i18n {lang}: ModHandler 参数条目齐全', not missing, f'缺失={missing}')
+    check(f'i18n {lang}: 有 Task.ModHandler（菜单/概览文案）',
+          'ModHandler' in i18n.get('Task', {}),
+          f'实际={i18n.get("Task", {}).get("ModHandler")}')
+
+# 防回归：args.json 里每个叶子节点都必须是含 type/value 的 dict。
+# 曾经把 Storage 块少写一层嵌套，导致 GUI 打开配置页直接
+# TypeError: string indices must be integers。
+_bad_nodes = ['.'.join(keys) for keys, data in _deep_iter(args, depth=3)
+              if not isinstance(data, dict) or 'value' not in data or 'type' not in data]
+check('args.json 拓扑正常（无裸字符串/缺 value 的节点）', not _bad_nodes,
+      f'异常={_bad_nodes[:8]}')
 
 # ---------------------------------------------------------------- 4. 状态机
 checker.header('4. 状态机（假设备）')

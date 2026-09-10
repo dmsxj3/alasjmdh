@@ -35,6 +35,10 @@
     "Tool": {
       "name": "Tools",
       "help": ""
+    },
+    "ModHandler": {
+      "name": "Multiplier Control",
+      "help": ""
     }
   },
   "Task": {
@@ -308,6 +312,10 @@
     },
     "GameManager": {
       "name": "Game Manager(WIP)",
+      "help": ""
+    },
+    "ModHandler": {
+      "name": "Multiplier Control",
       "help": ""
     }
   },

@@ -106,6 +106,8 @@ NO_CHANGE_TASKS = [
     'opsi_general',
     'alas',
     'game_manager',
+    # 本功能自己的配置页（工具页里的一个任务，不参与战斗）
+    'mod_handler',
     # 后勤 / 非战斗
     'commission',
     'tactical',

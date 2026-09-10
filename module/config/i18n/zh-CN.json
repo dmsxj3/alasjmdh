@@ -35,6 +35,10 @@
     "Tool": {
       "name": "工具",
       "help": ""
+    },
+    "ModHandler": {
+      "name": "悬浮窗倍率控制",
+      "help": ""
     }
   },
   "Task": {
@@ -308,6 +312,10 @@
     },
     "GameManager": {
       "name": "游戏管理器(未完成)",
+      "help": ""
+    },
+    "ModHandler": {
+      "name": "悬浮窗倍率控制",
       "help": ""
     }
   },

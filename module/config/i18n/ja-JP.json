@@ -35,6 +35,10 @@
     "Tool": {
       "name": "ツール",
       "help": ""
+    },
+    "ModHandler": {
+      "name": "倍率制御",
+      "help": ""
     }
   },
   "Task": {
@@ -308,6 +312,10 @@
     },
     "GameManager": {
       "name": "Game Manager(WIP)",
+      "help": ""
+    },
+    "ModHandler": {
+      "name": "倍率制御",
       "help": ""
     }
   },
