@@ -301,20 +301,23 @@ def main():
         print(f'       toolkit\\python.exe dev_tools/mod_discover.py --serial {serial} diff baseline')
         return 0
 
-    # 布尔开关（例：以德服人）无法从数值推断，只提示怎么发现
+    # 布尔开关无法从数值推断，只提示怎么发现
     known = set(str(k) for k in list(off) + list(on))
     unknown_bools = [k for k, _ in bools if str(k) not in known]
     if unknown_bools:
-        print(f'\n  [i] 还有 {len(unknown_bools)} 个布尔开关没纳入控制（例：以德服人）。')
-        print('      它们无法从数值推断，用快照对比法确定：')
+        managed_bools = [k for k, _ in bools if str(k) in known]
+        if managed_bools:
+            print(f'\n  [i] 已纳入控制的布尔开关: {managed_bools}')
+        print(f'  [i] 另有 {len(unknown_bools)} 个布尔开关未纳入控制: {unknown_bools}')
+        print('      它们不影响倍率开关本身；如果你想把其中某个（比如以德服人）也一起控制，')
+        print('      用快照对比法拿到它的编号：')
         print(f'        1) toolkit\\python.exe dev_tools/mod_discover.py --serial {serial} '
               f'snapshot yide')
-        print('        2) 在悬浮窗「常用」页把「以德服人」拨一下，退出悬浮窗让它落盘')
+        print('        2) 在悬浮窗「常用」页把它拨一下，退出悬浮窗让它落盘')
         print(f'        3) toolkit\\python.exe dev_tools/mod_discover.py --serial {serial} '
               f'diff yide')
-        print('      输出的 CHANGED 行就是它的 key，再按')
-        print('        OffKeys 追加 <key>=false   OnKeys 追加 <key>=true')
-        print('      加进配置。不添加也不影响倍率开关本身。')
+        print('      输出的 CHANGED 行就是它的编号，再按')
+        print('        OffKeys 追加 <编号>=false   OnKeys 追加 <编号>=true')
 
     ok = True
     for label, mapping in (('OffKeys', off), ('OnKeys', on)):
