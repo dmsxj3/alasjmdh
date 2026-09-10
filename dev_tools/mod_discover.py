@@ -31,6 +31,13 @@ import subprocess
 import sys
 import time
 
+# 本脚本在 dev_tools/ 子目录里，而 set/restore 要用到 module.mod_handler。
+# 不把项目根加进 sys.path 就会 ModuleNotFoundError: No module named 'module'。
+ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+if ROOT not in sys.path:
+    sys.path.insert(0, ROOT)
+os.chdir(ROOT)
+
 DEFAULT_PACKAGE = 'com.bilibili.azurlane'
 DEFAULT_PREFS_FILE = 'com.bilibili.azurlane_preferences'
 SNAP_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), '.mod_snapshots')
@@ -367,7 +374,7 @@ def cmd_set(args):
     print('\n下一步：启动游戏，打开悬浮窗看那个功能有没有真的变化。')
     print(f'  - 变了   -> 这个 key({args.key}) 就是它，记下来填进 OffKeys/OnKeys')
     print(f'  - 没变   -> 这个 key 不是它，换一个再试（或 restore 还原）')
-    print(f'  还原：toolkit\\python.exe {os.path.basename(__file__)} '
+    print(f'  还原：toolkit\\python.exe dev_tools\\{os.path.basename(__file__)} '
           f'--serial {args.serial} restore <快照名>')
     return 0
 
