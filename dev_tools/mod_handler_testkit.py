@@ -128,10 +128,11 @@ class FakeConfig:
         }
         values.update(mod_values)
         self.config_name = config_name
-        self.data = {'ModHandler': values}
+        # 与真实 config.data 同构：任务名.参数组.参数（ModHandler 任务 / ModHandler 组）
+        self.data = {'ModHandler': {'ModHandler': values, 'Storage': {'Storage': {}}}}
 
     def set(self, **kwargs):
-        self.data['ModHandler'].update(kwargs)
+        self.data['ModHandler']['ModHandler'].update(kwargs)
         return self
 
 

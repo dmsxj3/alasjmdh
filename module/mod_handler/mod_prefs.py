@@ -42,29 +42,32 @@ class ModPrefs(ModuleBase):
         self.device = device
 
     # ------------------------------------------------------------ 配置
+    # 路径为 ModHandler.ModHandler.<参数>：ALAS 的任务名与参数组名同名时是两层
     @property
     def package(self):
-        return str(deep_get(self.config.data, 'ModHandler.PackageName', default=DEFAULT_PACKAGE)
-                   or DEFAULT_PACKAGE)
+        return str(deep_get(self.config.data, 'ModHandler.ModHandler.PackageName',
+                            default=DEFAULT_PACKAGE) or DEFAULT_PACKAGE)
 
     @property
     def prefs_file(self):
-        return str(deep_get(self.config.data, 'ModHandler.PrefsFile', default=DEFAULT_PREFS_FILE)
-                   or DEFAULT_PREFS_FILE)
+        return str(deep_get(self.config.data, 'ModHandler.ModHandler.PrefsFile',
+                            default=DEFAULT_PREFS_FILE) or DEFAULT_PREFS_FILE)
 
     @property
     def off_keys(self):
         from module.mod_handler.mod_handler import parse_key_values
-        return parse_key_values(deep_get(self.config.data, 'ModHandler.OffKeys', default=''))
+        return parse_key_values(
+            deep_get(self.config.data, 'ModHandler.ModHandler.OffKeys', default=''))
 
     @property
     def on_keys(self):
         from module.mod_handler.mod_handler import parse_key_values
-        return parse_key_values(deep_get(self.config.data, 'ModHandler.OnKeys', default=''))
+        return parse_key_values(
+            deep_get(self.config.data, 'ModHandler.ModHandler.OnKeys', default=''))
 
     @property
     def restart_game(self):
-        return bool(deep_get(self.config.data, 'ModHandler.RestartGame', default=True))
+        return bool(deep_get(self.config.data, 'ModHandler.ModHandler.RestartGame', default=True))
 
     @property
     def remote_path(self):

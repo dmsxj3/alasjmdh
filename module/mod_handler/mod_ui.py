@@ -63,25 +63,31 @@ class ModUi(ModuleBase):
         self._d = None
 
     # ------------------------------------------------------------ 配置
+    # 路径为 ModHandler.ModHandler.<参数>：ALAS 的任务名与参数组名同名时是两层
     @property
     def open_point(self):
-        return parse_point(deep_get(self.config.data, 'ModHandler.UiOpenPoint', default=''))
+        return parse_point(deep_get(self.config.data, 'ModHandler.ModHandler.UiOpenPoint',
+                                    default=''))
 
     @property
     def close_point(self):
-        return parse_point(deep_get(self.config.data, 'ModHandler.UiClosePoint', default=''))
+        return parse_point(deep_get(self.config.data, 'ModHandler.ModHandler.UiClosePoint',
+                                    default=''))
 
     @property
     def off_labels(self):
-        return parse_labels(deep_get(self.config.data, 'ModHandler.UiOffLabels', default=''))
+        return parse_labels(deep_get(self.config.data, 'ModHandler.ModHandler.UiOffLabels',
+                                     default=''))
 
     @property
     def on_labels(self):
-        return parse_labels(deep_get(self.config.data, 'ModHandler.UiOnLabels', default=''))
+        return parse_labels(deep_get(self.config.data, 'ModHandler.ModHandler.UiOnLabels',
+                                     default=''))
 
     @property
     def tap_points(self):
-        return parse_tap_points(deep_get(self.config.data, 'ModHandler.UiTapPoints', default=''))
+        return parse_tap_points(deep_get(self.config.data, 'ModHandler.ModHandler.UiTapPoints',
+                                         default=''))
 
     # ------------------------------------------------------------ 设备
     @property
@@ -98,7 +104,7 @@ class ModUi(ModuleBase):
         if det is None:
             return None
         det.wait_timeout = float(
-            deep_get(self.config.data, 'ModHandler.UiWaitTimeout', default=5) or 5)
+            deep_get(self.config.data, 'ModHandler.ModHandler.UiWaitTimeout', default=5) or 5)
         return det.wait_timeout
 
     def _find_switch(self, label):

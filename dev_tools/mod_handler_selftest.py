@@ -28,6 +28,8 @@ install_stubs()
 TMP = tempfile.mkdtemp(prefix='alas_mod_state_')
 
 from module.mod_handler import mod_handler as mh  # noqa: E402
+from module.mod_handler.mod_prefs import ModPrefs  # noqa: E402
+from module.config.config_updater import ConfigUpdater  # noqa: E402
 
 mh.STATE_DIR = TMP
 
@@ -181,6 +183,33 @@ _bad_nodes = ['.'.join(keys) for keys, data in _deep_iter(args, depth=3)
               if not isinstance(data, dict) or 'value' not in data or 'type' not in data]
 check('args.json 拓扑正常（无裸字符串/缺 value 的节点）', not _bad_nodes,
       f'异常={_bad_nodes[:8]}')
+
+# 防回归：参数路径必须是 ModHandler.ModHandler.<参数>。
+# 曾经写成 ModHandler.Enabled（少一层），deep_get 静默返回 default，
+# 功能永远不生效 —— 而当时的假配置恰好也是错的，所以测试全绿。
+_real_data = ConfigUpdater().read_file('template')  # 只读，不落盘
+_real_data['ModHandler'] = {'ModHandler': dict(args['ModHandler']['ModHandler']),
+                            'Storage': {'Storage': {}}}
+for key, definition in args['ModHandler']['ModHandler'].items():
+    _real_data['ModHandler']['ModHandler'][key] = definition['value']
+_real_cfg = FakeConfig()
+_real_cfg.data = _real_data
+_real_handler = mh.ModHandler(config=_real_cfg, device='skip')
+eq('真实配置形状下 enabled 能读到 Enabled',
+   _real_handler.enabled, args['ModHandler']['ModHandler']['Enabled']['value'])
+eq('真实配置形状下 backend 能读到 Backend',
+   _real_handler.backend, args['ModHandler']['ModHandler']['Backend']['value'])
+eq('真实配置形状下 sensitive_option 能读到 SensitiveTask',
+   _real_handler.sensitive_option,
+   args['ModHandler']['ModHandler']['SensitiveTask']['value'])
+eq('真实配置形状下 off_keys 能读到 OffKeys',
+   _real_handler.off_keys, mh.parse_key_values(
+       args['ModHandler']['ModHandler']['OffKeys']['value']))
+_real_prefs = ModPrefs(config=_real_cfg, device=None)
+eq('真实配置形状下 ModPrefs.package 能读到 PackageName',
+   _real_prefs.package, args['ModHandler']['ModHandler']['PackageName']['value'])
+eq('真实配置形状下 ModPrefs.restart_game 能读到 RestartGame',
+   _real_prefs.restart_game, args['ModHandler']['ModHandler']['RestartGame']['value'])
 
 # ---------------------------------------------------------------- 4. 状态机
 checker.header('4. 状态机（假设备）')

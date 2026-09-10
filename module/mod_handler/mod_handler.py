@@ -256,27 +256,33 @@ class ModHandler(ModuleBase):
         self._last_want = None
 
     # ------------------------------------------------------------ 配置读取
+    # 注意路径是 ModHandler.ModHandler.<参数>：ALAS 的任务名与参数组名同名时，
+    # config.data 里就是 <任务>.<组>.<参数> 两层。写成 ModHandler.Enabled 会
+    # 悄悄读不到（deep_get 返回 default），功能看着"没反应"。
     @property
     def enabled(self):
-        return bool(deep_get(self.config.data, 'ModHandler.Enabled', default=False))
+        return bool(deep_get(self.config.data, 'ModHandler.ModHandler.Enabled', default=False))
 
     @property
     def backend(self):
-        return str(deep_get(self.config.data, 'ModHandler.Backend', default='prefs') or 'prefs')
+        return str(deep_get(self.config.data, 'ModHandler.ModHandler.Backend',
+                            default='prefs') or 'prefs')
 
     @property
     def sensitive_option(self):
         return str(deep_get(self.config.data,
-                            'ModHandler.SensitiveTask',
+                            'ModHandler.ModHandler.SensitiveTask',
                             default='disable_all_dangerous_task'))
 
     @property
     def off_keys(self):
-        return parse_key_values(deep_get(self.config.data, 'ModHandler.OffKeys', default=''))
+        return parse_key_values(
+            deep_get(self.config.data, 'ModHandler.ModHandler.OffKeys', default=''))
 
     @property
     def on_keys(self):
-        return parse_key_values(deep_get(self.config.data, 'ModHandler.OnKeys', default=''))
+        return parse_key_values(
+            deep_get(self.config.data, 'ModHandler.ModHandler.OnKeys', default=''))
 
     @property
     def keys_configured(self):
