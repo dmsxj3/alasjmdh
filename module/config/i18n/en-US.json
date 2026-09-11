@@ -3289,7 +3289,7 @@
     },
     "OverlayFallbackPrefs": {
       "name": "Fallback to prefs on failure",
-      "help": "On (default): when the overlay path cannot be confirmed, fall back to editing the shared-prefs XML, which needs a game restart.\\nSafety net: one extra restart beats letting a sensitive task run with the multiplier on.\\nTurn it off and a failure only logs CRITICAL without restarting."
+      "help": "Off (default): when the overlay path cannot be confirmed, only a CRITICAL log is written and the game is never restarted.\\nTurn it on for a safety net: fall back to editing the shared-prefs XML (needs a restart) so a sensitive task never runs with the multiplier on. Enable at your own discretion."
     }
   },
   "Storage": {

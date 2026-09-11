@@ -10318,7 +10318,7 @@
       },
       "OverlayFallbackPrefs": {
         "type": "checkbox",
-        "value": true
+        "value": false
       },
       "OffKeys": {
         "type": "input",

@@ -583,7 +583,7 @@ class GeneratedConfig:
     ModHandler_OverlayService = 'com.android.support.Launcher'
     ModHandler_OverlaySurvivalSeconds = 20
     ModHandler_OverlayVisualVerify = True
-    ModHandler_OverlayFallbackPrefs = True
+    ModHandler_OverlayFallbackPrefs = False
     ModHandler_OffKeys = '1=1,2=1,3=1,35=false'
     ModHandler_OnKeys = '1=1000,2=1000,3=1000,35=true'
     ModHandler_SensitiveTask = 'disable_all_dangerous_task'  # disable_all_dangerous_task, disable_guild_and_dangerous, disable_meta_and_exercise, disable_exercise, enable_all
