@@ -3221,10 +3221,10 @@
     },
     "Backend": {
       "name": "控制方式",
-      "help": "【預設是 prefs，較穩】overlay 能零重啟，但在**部分改版包的 x86_64 原生庫上會把遊戲搞崩**：\\n遊戲行程不存在時，am startservice 會新拉起一個行程，Launcher.onCreate -> new Menu ->\\nMenu.Icon() 拋 UnsatisfiedLinkError，整個遊戲行程崩潰（實測 logcat: am_crash + am_proc_died）。\\n本實作已加防護：先確認遊戲行程在跑才調起；一旦發現 pid 變化或消失就永久停用 overlay 並降級 prefs。\\noverlay（推薦）：用 root adb 調起 mod 的備用 Service 讓懸浮窗重新出現，再點每個倍率後面的數字、在彈出的輸入框精確填入 1，並關掉「以德服人」開關；mod 會直接改記憶體並落盤，**零重啟**，做完懸浮窗按 -98 秒自行消失。\\nprefs：直接改共享設定 XML，需要停遊戲、且要重啟遊戲才生效。\\nui：用 uiautomator2 點懸浮窗控件（懸浮窗本體不在輔助功能樹裡，通常用不了）。",
+      "help": "【推薦 overlay，零重啟】用 root 調起 mod 的備用 Service 讓懸浮窗重新出現，再把三個倍率滑桿拖到最小、關掉「以德服人」開關 —— mod 會即時改記憶體並落盤，遊戲不用重啟。\\n★ 不要用懸浮窗裡的數字輸入框：點倍率後面的數字會彈出 Input number 對話框，而它的 OK 按鈕在改版包上是壞的 —— 按下會拋 ClassCastException 直接讓遊戲崩潰。本實作全程只用滑桿和開關。\\nprefs：直接改共享設定 XML，需要停遊戲、且要重啟遊戲才生效。\\nui：用 uiautomator2 點懸浮窗控件（懸浮窗本體不在輔助功能樹裡，基本不可用，僅留檔）。",
+      "overlay": "調懸浮窗拖滑桿/點開關（零重啟，推薦）",
       "prefs": "改共享設定（需重啟生效）",
-      "ui": "點懸浮窗控件（免 root）",
-      "overlay": "調懸浮窗點數字/開關（零重啟，推薦）"
+      "ui": "點懸浮窗控件（免 root，基本不可用）"
     },
     "PackageName": {
       "name": "遊戲套件名稱",
@@ -3277,19 +3277,19 @@
     },
     "OverlayService": {
       "name": "懸浮窗調起組件",
-      "help": "mod 裡註冊但平時不會被呼叫的備用 Service。用 root 執行 stopservice + startservice 就能讓懸浮窗重新出現。\\n必須先停再啟 —— Service 還活著時 startservice 只走 onStartCommand，不會重建視窗。\\n預設 com.android.support.Launcher（MOD_MENU 3.4.0 實測）。"
+      "help": "mod 裡註冊但平時不會被呼叫的備用 Service。用 root 執行 stopservice + startservice 就能讓懸浮窗重新出現。\\n必須**先停再啟** —— Service 還活著時 startservice 只走 onStartCommand，不會重建視窗。\\n★ 只在遊戲行程已經在跑時才調起：行程不在時 startservice 會新起一個行程，那裡原生庫還沒初始化，Launcher.onCreate -> new Menu -> Menu.Icon() 會拋 UnsatisfiedLinkError 把遊戲整個搞崩。\\n預設 com.android.support.Launcher（JMBQ 3.4.0 實測）。"
     },
     "OverlaySurvivalSeconds": {
       "name": "懸浮窗存活秒數（備援值）",
-      "help": "對應 mod 內部的 prefs 鍵 -98（可在 mod 面板設 0~20）。\\nAlas 會優先讀裝置上真實的 -98，讀不到才用這裡的值。\\n操作完成後會等懸浮窗自行消失（-98+4 秒）再繼續任務。預設 20。"
+      "help": "對應 mod 內部的 prefs 鍵 -98，可在 mod 面板裡改。\\nAlas 會優先讀裝置上真實的 -98，讀不到才用這裡的值；遊戲關著時會順便寫成這個值。\\n實測面板**每次被觸摸都會重新計時**，操作期間不會中途消失；做完等它自滅再繼續任務，避免面板擋住 Alas 的截圖識別。預設 20。"
     },
     "OverlayVisualVerify": {
-      "name": "開啟截圖識別複核",
-      "help": "預設開啟：改完之後除了讀 XML 精確核對外，再截一張圖做第二道確認 ——\\n「以德服人」用模板比對開關圖形，三個倍率用 OCR 讀數字。\\n識圖讀不出來不會判失敗，權威判據始終是 XML。"
+      "name": "改完再截圖複核",
+      "help": "預設開啟：改完之後，除了讀 XML 精確核對外，再截一張圖做第二道確認 ——\\n三個倍率：在截圖上找滑桿 thumb（青色圓點）的位置反解數值；「以德服人」：取樣開關區域的顏色判斷開/關。\\n這一條**只做記錄**：識圖讀不出來不會判失敗，權威判據始終是 XML。"
     },
     "OverlayFallbackPrefs": {
       "name": "失敗時降級到 prefs",
-      "help": "預設開啟：懸浮窗方式沒確認生效時，自動降級去改共享設定 XML —— 那需要重啟遊戲。\\n這是安全網：寧可多一次重啟，也不能讓敏感任務（演習/META/共鬥）帶著倍率開打。\\n關掉它則失敗時只記 CRITICAL，不做任何重啟，但倍率可能仍開著。"
+      "help": "預設開啟：懸浮窗方式沒能確認生效時，自動降級去改共享設定 XML —— 那需要重啟遊戲。\\n這是安全網：寧可多一次重啟，也不能讓敏感任務（演習/META/共鬥）帶著倍率開打。\\n關掉它則失敗時只記 CRITICAL，不做任何重啟，但倍率可能仍開著。"
     }
   },
   "Storage": {

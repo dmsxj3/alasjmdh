@@ -6,11 +6,14 @@ ModHandler — 改版客户端（JMBQ / azurlan）悬浮窗倍率控制。
 
 设计：
   - 本模块只负责「策略」：判断当前任务该开还是该关，并驱动后端执行。
-  - 后端（怎么改）与策略（什么时候改）分离：
-      * ModPrefs  —— root 直接改模组的 SharedPreferences（MuMu 等已 root 环境，最稳）
-      * ModUi     —— uiautomator2 点击悬浮窗开关（无 root 时的兜底）
-  - 真实状态优先：每次决策先向后端读回设备上的实际开关状态（ModPrefs 读 XML，
-    ModUi 展开悬浮窗读控件），读回失败才退回本地缓存。
+  - 后端（怎么改）与策略（什么时候改）分离【按可靠性排序】：
+      * ModOverlay —— root 调起 mod 的备用 Service 让悬浮窗出现，拖滑块 / 点开关。
+                      mod 直接改内存并落盘，**零重启**。默认后端。
+      * ModPrefs   —— root 直接改模组的 SharedPreferences。最通用（换版本/换服也能用），
+                      但需要停游戏、且要重启游戏才生效。
+      * ModUi      —— uiautomator2 点击悬浮窗控件（悬浮窗不在辅助功能树里，基本不可用，仅留档）。
+  - 真实状态优先：每次决策先向后端读回设备上的实际开关状态
+    （ModOverlay / ModPrefs 都读 XML，ModUi 展开悬浮窗读控件），读回失败才退回本地缓存。
     这样用户手动动过悬浮窗也能被纠正，而不是盲信 last-known。
   - 状态落盘到 config/mod_handler/mod_state_<config_name>.json，跨轮记忆。
   - 未列入任何分组的任务沿用「上次已做出的决定」，不做新的推测，
@@ -48,13 +51,20 @@ ModHandler — 改版客户端（JMBQ / azurlan）悬浮窗倍率控制。
    ⇒ 「状态真的变化 = 一次游戏重启」是这套机制的硬下限；
      本模块的职责是保证**只有状态真的变化时才重启**，不产生多余重启。
 
-4. 悬浮窗本体（com.android.support.Menu）：
-   - 由注入游戏进程的代码创建，是 WindowManager 的 overlay，不在 uiautomator2
-     辅助功能树里，读不到也点不到它的控件；
-   - 自动关闭时间就是上面的 -98（用户实测设为 10 秒，避免遮挡 Alas 截图识别）；
-   - 该 overlay 没有注册进游戏 AndroidManifest（dumpsys package 里查不到
-     com.android.support.* 组件），外部无法用 am start/broadcast 唤出。
-   ⇒ prefs 是唯一可靠的控制通道；ui 后端只在特定改版包上可能可用。
+4. 悬浮窗本体（com.android.support.Menu）【2026-09-11 二轮实测，更正上一版结论】：
+   - 它确实不在 uiautomator2 辅助功能树里，也**没有**注册进游戏 AndroidManifest
+     （`dumpsys package` 的 Service Resolver Table 里查不到 com.android.support.* ——
+     但注意那张表只列**带 intent-filter** 的组件，显式组件查不到 ≠ 没注册）；
+   - **但它可以被程序化调起**：用 root 执行
+        am stopservice -n <pkg>/com.android.support.Launcher
+        am startservice -n <pkg>/com.android.support.Launcher
+     悬浮窗就会重新出现（必须先停再启）。窗口是 APPLICATION_OVERLAY + fl=NOT_FOCUSABLE
+     （没有 NOT_TOUCHABLE）⇒ **可点击**。
+   - 自动关闭时间 = prefs 键 -98，且实测**每次触摸都会重新计时**；
+   - ⚠️ mod 自带的「点数字 -> Input number 对话框」的 OK 按钮在 x86_64 包上是坏的，
+     按下会 `ClassCastException: Launcher cannot be cast to Activity` 直接崩游戏。
+     ModOverlay 因此**只用滑块和开关**，绝不打开该对话框。
+   ⇒ 想零重启就用 ModOverlay；换 mod 版本/换服导致坐标对不上时，它会自动降级到 ModPrefs。
 """
 import json
 import os
@@ -628,7 +638,7 @@ class ModHandler(ModuleBase):
 
         # 敏感任务 = 必须关闭倍率的任务。AlasGG 的 GGHandler 在这里会 gg_reset()，
         # 也就是关掉 GG 并重启游戏，保证"关"一定生效。
-        # overlay 后端：调起悬浮窗点数字/开关，mod 直接改内存并落盘，零重启；
+        # overlay 后端：调起悬浮窗拖滑块/点开关，mod 直接改内存并落盘，零重启；
         # prefs 后端：重启与否统一由 _restart_for 按 RestartTask 决定。
         sensitive = task in disabled
         restart = self._restart_for(want_on, sensitive=sensitive)

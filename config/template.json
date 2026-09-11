@@ -2188,7 +2188,7 @@
       "Enabled": true,
       "Backend": {
         "type": "select",
-        "value": "prefs",
+        "value": "overlay",
         "option": [
           "overlay",
           "prefs",
