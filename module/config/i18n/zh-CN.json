@@ -35,6 +35,10 @@
     "Tool": {
       "name": "工具",
       "help": ""
+    },
+    "ModHandler": {
+      "name": "悬浮窗倍率控制",
+      "help": ""
     }
   },
   "Task": {
@@ -308,6 +312,10 @@
     },
     "GameManager": {
       "name": "游戏管理器(未完成)",
+      "help": ""
+    },
+    "ModHandler": {
+      "name": "悬浮窗倍率控制",
       "help": ""
     }
   },
@@ -3192,6 +3200,86 @@
     "AutoRestart": {
       "name": "自动登录",
       "help": "游戏被强制结束后自动登录游戏"
+    }
+  },
+  "ModHandler": {
+    "_info": {
+      "name": "悬浮窗倍率控制",
+      "help": "改版客户端（JMBQ / azurlan）悬浮窗的倍率等影响舰船属性功能，按任务自动开关。\n\n默认行为：META（余烬信标）、演习、共斗时自动关闭倍率，其他任务正常启用。\n敏感任务用倍率是封号高发区，建议保持默认。\n\n注意：改版客户端的悬浮窗是 Perseus 系菜单框架，开关状态存在 SharedPreferences 里，\n功能以数字 ID 作为 key，需要先用 dev_tools/mod_discover.py 发现映射并填到 OffKeys / OnKeys。"
+    },
+    "CurrentState": {
+      "name": "当前倍率状态",
+      "help": "直读游戏悬浮窗配置得到的真实状态。打开本页时刷新一次。\n「开」= 倍率等功能已启用；「关」= 已关闭；\n「未知」= 设备无 root 或读不到配置；「未配置」= 还没填 OffKeys / OnKeys。",
+      "icon_on": "✔ 倍率已开启",
+      "icon_off": "✖ 倍率已关闭",
+      "icon_unknown": "？ 读不到状态",
+      "icon_unconfigured": "⚠ 尚未配置 OffKeys / OnKeys"
+    },
+    "Enabled": {
+      "name": "启用悬浮窗倍率控制",
+      "help": "总开关。打开后 Alas 才会按任务自动开关倍率。\n关闭时本功能完全不影响游戏。"
+    },
+    "Backend": {
+      "name": "控制方式",
+      "help": "prefs：通过 root 直接改悬浮窗的 SharedPreferences，最稳，需要设备已 root（MuMu 默认可用）。\nui：用 uiautomator2 点悬浮窗开关，不需要 root，但悬浮窗若不在辅助功能树里会失败。",
+      "prefs": "改配置文件（需 root）",
+      "ui": "点悬浮窗（免 root）"
+    },
+    "PackageName": {
+      "name": "游戏包名",
+      "help": "默认 com.bilibili.azurlane（B服）。其他服请填对应包名。"
+    },
+    "PrefsFile": {
+      "name": "配置文件名",
+      "help": "悬浮窗存开关的 SharedPreferences 文件名（不含 .xml）。\n默认 com.bilibili.azurlane_preferences。"
+    },
+    "OffKeys": {
+      "name": "关闭倍率时写入",
+      "help": "关闭倍率时要写成的键值对，形如 1=1,2=1,3=1（也支持 JSON：键与值都加双引号）。\n用 dev_tools/mod_discover.py 自动发现：先 snapshot，手动关掉悬浮窗里的倍率，再 diff。"
+    },
+    "OnKeys": {
+      "name": "启用倍率时写回",
+      "help": "恢复倍率时写回的键值对，形如 1=1000,2=1000,3=1000。\n与 OffKeys 成对使用。"
+    },
+    "RestartTask": {
+      "name": "什么时候重启游戏",
+      "help": "改配置文件前必须先停游戏：游戏把开关缓存在内存里，运行中改文件它读不到，\n而且退出时会把改动覆盖回去。这个选项决定\"停完要不要马上把游戏重新启动\"。\n\n总是重启（推荐）：状态真的变了就 停游戏 -> 写文件 -> 重启并等登录。\n注意只有状态真的变化时才重启 —— 连续两个常规图，第二次什么都不做。\n\n仅敏感任务：敏感任务关倍率时立刻重启（保证\"关\"生效）；其他任务只写文件、\n由 Alas 自己排 Restart 任务启动。省重启次数，但中间会多一次游戏关闭/启动。\n\n从不重启：完全不碰游戏进程，只写配置文件。\n★ 这一档不会让倍率真正变化 ★ —— 游戏不会重新读取配置，\n改动要等下一次游戏自然重启才可能生效，而且可能被运行中的游戏覆盖回去。\n选它等于放弃本功能，只在你想手动控制游戏时才有意义。",
+      "sensitive_only": "仅敏感任务（其余交给 Alas 启动）",
+      "always": "总是重启（推荐）",
+      "never": "从不重启（只写文件，倍率不会变）"
+    },
+    "SensitiveTask": {
+      "name": "禁用倍率的任务范围",
+      "help": "敏感项目 = 共斗 / META / 演习，用倍率封号风险最高。\n默认「仅关敏感项」即需求所要求的：META、演习、共斗关倍率，其他任务正常启用。",
+      "disable_all_dangerous_task": "仅关敏感项（共斗/META/演习）",
+      "disable_guild_and_dangerous": "敏感项 + 大舰队",
+      "disable_meta_and_exercise": "仅关 META 与演习",
+      "disable_exercise": "仅关演习",
+      "enable_all": "百无禁忌（全开）"
+    },
+    "UiOpenPoint": {
+      "name": "打开悬浮窗的坐标",
+      "help": "ui 方式专用：点击该坐标展开悬浮窗，形如 960,540。\n留空表示悬浮窗已展开。"
+    },
+    "UiClosePoint": {
+      "name": "关闭悬浮窗的坐标",
+      "help": "ui 方式专用：操作完成后点击该坐标收起悬浮窗，形如 960,540。留空则不收起。"
+    },
+    "UiOffLabels": {
+      "name": "要关闭的开关文本",
+      "help": "ui 方式专用：要置为「关」的开关文本，逗号分隔。\n例如：倍攻倍防,舰船装填倍率"
+    },
+    "UiOnLabels": {
+      "name": "要开启的开关文本",
+      "help": "ui 方式专用：恢复时置为「开」的开关文本，逗号分隔。留空则复用上面的列表。"
+    },
+    "UiTapPoints": {
+      "name": "坐标兜底",
+      "help": "ui 方式专用：控件找不到时按坐标点，形如 倍攻倍防=120,300;舰船装填倍率=120,360"
+    },
+    "UiWaitTimeout": {
+      "name": "控件等待超时(秒)",
+      "help": "ui 方式专用：等待控件出现的秒数，设备慢就调大。"
     }
   },
   "Storage": {

@@ -35,6 +35,10 @@
     "Tool": {
       "name": "ツール",
       "help": ""
+    },
+    "ModHandler": {
+      "name": "倍率制御",
+      "help": ""
     }
   },
   "Task": {
@@ -308,6 +312,10 @@
     },
     "GameManager": {
       "name": "Game Manager(WIP)",
+      "help": ""
+    },
+    "ModHandler": {
+      "name": "倍率制御",
       "help": ""
     }
   },
@@ -3192,6 +3200,86 @@
     "AutoRestart": {
       "name": "GameManager.AutoRestart.name",
       "help": "GameManager.AutoRestart.help"
+    }
+  },
+  "ModHandler": {
+    "_info": {
+      "name": "フローティングメニュー倍率制御",
+      "help": "改造クライアント（JMBQ / azurlan）のフローティングメニューにある倍率など\n艦船ステータスに影響する機能を、実行するタスクに応じて自動で切り替えます。\n\n既定の動作：META（残響ビーコン）、演習、レイドでは倍率をオフ、\nその他のタスクでは通常どおりオンにします。\n敏感な任務での倍率使用はアカウント停止の最多要因です。既定のままを推奨します。\n\n注意：フローティングメニューの設定は SharedPreferences に数値 ID をキーとして保存されます。\ndev_tools/mod_discover.py で対応を調べ、OffKeys / OnKeys に設定してください。"
+    },
+    "CurrentState": {
+      "name": "現在の倍率状態",
+      "help": "ゲームのフローティングメニュー設定から直接読み取った実際の状態です。このページを開いた時に更新されます。\n「オン」は倍率などが有効、「オフ」は無効を意味します。\n「不明」は root が無いか設定を読めない場合、「未設定」は OffKeys / OnKeys が未入力の場合です。",
+      "icon_on": "ON - 倍率有効",
+      "icon_off": "OFF - 倍率無効",
+      "icon_unknown": "? 状態を読めません",
+      "icon_unconfigured": "! OffKeys / OnKeys 未設定"
+    },
+    "Enabled": {
+      "name": "倍率制御を有効にする",
+      "help": "マスタースイッチ。オンにすると Alas がタスクごとに倍率を自動で切り替えます。\nオフの場合はゲームに一切触れません。"
+    },
+    "Backend": {
+      "name": "制御方式",
+      "help": "prefs：root で SharedPreferences を直接書き換えます。最も確実で root が必要です（MuMu は既定で root 可）。\nui：uiautomator2 でスイッチをタップします。root 不要ですが、オーバーレイがアクセシビリティツリーに無い場合は失敗します。",
+      "prefs": "設定ファイルを書き換え（root 必須）",
+      "ui": "オーバーレイをタップ（root 不要）"
+    },
+    "PackageName": {
+      "name": "ゲームのパッケージ名",
+      "help": "既定は com.bilibili.azurlane（CN版）。他サーバーは該当するパッケージ名を入力してください。"
+    },
+    "PrefsFile": {
+      "name": "設定ファイル名",
+      "help": "フローティングメニューのスイッチを保存する SharedPreferences のファイル名（.xml を除く）。\n既定は com.bilibili.azurlane_preferences。"
+    },
+    "OffKeys": {
+      "name": "倍率オフ時に書き込む値",
+      "help": "倍率を無効にするときに書き込むキーと値。例：1=1,2=1,3=1（キーと値を二重引用符で囲んだ JSON 形式も可）。\ndev_tools/mod_discover.py で自動検出：snapshot → 手動で倍率をオフ → diff。"
+    },
+    "OnKeys": {
+      "name": "倍率オン時に書き戻す値",
+      "help": "倍率を復元するときに書き戻すキーと値。例：1=1000,2=1000,3=1000。\nOffKeys と対で使用します。"
+    },
+    "RestartTask": {
+      "name": "ゲームを再起動するタイミング",
+      "help": "設定を書き換える前にゲームを停止する必要があります。ゲームはスイッチを メモリに保持しているため、動作中にファイルを編集しても反映されず、終了時に上書きされます。この項目は「停止後にすぐ起動し直すか」を決めます。\n\n常に再起動（推奨）：状態が実際に変わった時だけ 停止 -> 書き込み -> 再起動してログイン待ち。\n\n敏感タスクのみ：演習 / META / レイドで倍率をオフにする時だけすぐ再起動し、それ以外はファイルを書くだけで Alas の Restart タスクに任せます。\n\n再起動しない：ゲームプロセスに一切触れず、ファイルだけ書きます。\n★ これでは倍率は実際には変わりません ★ ゲームが設定を読み直さないためです。",
+      "sensitive_only": "敏感タスクのみ（それ以外は Alas に任せる）",
+      "always": "常に再起動（推奨）",
+      "never": "再起動しない（書くだけ、倍率は変わらない）"
+    },
+    "SensitiveTask": {
+      "name": "倍率を無効にするタスク範囲",
+      "help": "敏感な任務 = レイド / META / 演習。倍率使用のリスクが最も高い項目です。\n既定の「敏感項目のみ」が推奨動作です：META・演習・レイドでオフ、その他は通常どおりオン。",
+      "disable_all_dangerous_task": "敏感項目のみ（レイド/META/演習）",
+      "disable_guild_and_dangerous": "敏感項目 + 大艦隊",
+      "disable_meta_and_exercise": "META と演習のみ",
+      "disable_exercise": "演習のみ",
+      "enable_all": "すべて許可"
+    },
+    "UiOpenPoint": {
+      "name": "オーバーレイを開く座標",
+      "help": "ui 方式専用：この座標をタップしてオーバーレイを展開します。例：960,540。\n空欄なら既に展開済みとみなします。"
+    },
+    "UiClosePoint": {
+      "name": "オーバーレイを閉じる座標",
+      "help": "ui 方式専用：操作後にこの座標をタップして畳みます。例：960,540。空欄なら閉じません。"
+    },
+    "UiOffLabels": {
+      "name": "オフにするスイッチ名",
+      "help": "ui 方式専用：オフにするスイッチのラベル。カンマ区切り。\n例：攻撃防御倍率,装填倍率"
+    },
+    "UiOnLabels": {
+      "name": "オンにするスイッチ名",
+      "help": "ui 方式専用：復元時にオンにするスイッチのラベル。カンマ区切り。空欄なら上のリストを流用します。"
+    },
+    "UiTapPoints": {
+      "name": "座標フォールバック",
+      "help": "ui 方式専用：ウィジェットが見つからない場合にタップする座標。例：ラベル=120,300;別ラベル=120,360"
+    },
+    "UiWaitTimeout": {
+      "name": "ウィジェット待ち時間(秒)",
+      "help": "ui 方式専用：ウィジェットの出現を待つ秒数。遅い端末では大きくしてください。"
     }
   },
   "Storage": {

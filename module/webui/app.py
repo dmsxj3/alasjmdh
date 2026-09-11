@@ -333,9 +333,64 @@ class AlasGUI(Frame):
             )
 
         config = self.alas_config.read_file(self.alas_name)
+        self.refresh_mod_handler_state(config, task)
+        rendered = 0
         for group, arg_dict in deep_iter(self.ALAS_ARGS[task], depth=1):
             if self.set_group(group, arg_dict, config, task):
                 self.set_navigator(group)
+                rendered += 1
+        # 渲染计数落日志：页面空白时能一眼看出是配置没读到还是没画出来
+        if rendered:
+            logger.info(f"Set group {task}: {rendered} groups rendered")
+        else:
+            logger.warning(f"Set group {task}: nothing rendered, "
+                           f"args={'ok' if self.ALAS_ARGS.get(task) else 'MISSING'}")
+
+    def refresh_mod_handler_state(self, config, task: str) -> None:
+        """
+        打开「悬浮窗倍率控制」页面时，把设备上真实的倍率状态填进只读状态栏。
+
+        为什么不用 ModHandler / Device：
+          webui 进程为了省内存把 PIL 换成了假模块，只要碰到 module.device 的导入链
+          就会 `cannot import name 'ImageDraw' from 'PIL'`（试过换回真 PIL 也不稳，
+          因为残缺模块已经进了 sys.modules）。而读配置只需要一句
+          `adb shell su -c cat <prefs>`，没必要把截图/控制栈拉进来。
+          所以这里直接用 ModPrefs 的纯 adb 只读通道，全程不 import PIL。
+        """
+        if task != "ModHandler":
+            return
+
+        info = None
+        try:
+            from module.config.deep import deep_get as _deep_get
+            from module.mod_handler.mod_prefs import describe_state_readonly
+
+            # 诊断用：把「GUI 认为当前是哪个实例」和「读到的 key」一并落日志。
+            # 页面显示"尚未配置"时，这一行能直接区分是选错实例还是配置真的为空。
+            _raw_off = _deep_get(config, ["ModHandler", "ModHandler", "OffKeys"], default=None)
+            _raw_on = _deep_get(config, ["ModHandler", "ModHandler", "OnKeys"], default=None)
+            logger.info(f"ModHandler read: instance={self.alas_name!r} mod={self.alas_mod!r} "
+                        f"OffKeys={_raw_off!r} OnKeys={_raw_on!r}")
+
+            info = describe_state_readonly(config)
+            serial = deep_get(config, ["Alas", "Emulator", "Serial"], default=None)
+            if info.get("option") == "unknown" and serial:
+                info["detail"] = f'{info.get("detail", "")}（Emulator.Serial={serial}）'
+        except Exception as e:
+            logger.warning(f"Failed to read modifier state: {type(e).__name__}: {e}")
+            info = {"option": "unknown", "detail": f"读取失败: {type(e).__name__}: {e}"}
+
+        values = deep_get(config, ["ModHandler", "ModHandler"], default=None)
+        if not isinstance(values, dict):
+            logger.warning("ModHandler config section missing, status bar not filled")
+            return
+        state = info.get("option", "unknown")
+        values["CurrentState"] = {
+            "on": "icon_on",
+            "off": "icon_off",
+            "unconfigured": "icon_unconfigured",
+        }.get(state, "icon_unknown")
+        logger.info(f"ModHandler status bar: {values['CurrentState']} ({info.get('detail', '')})")
 
     @use_scope("groups")
     def set_group(self, group, arg_dict, config, task):
@@ -881,6 +936,7 @@ class AlasGUI(Frame):
         )
 
         config = self.alas_config.read_file(self.alas_name)
+        self.refresh_mod_handler_state(config, task)
         for group, arg_dict in deep_iter(self.ALAS_ARGS[task], depth=1):
             if group[0] == "Storage":
                 continue
