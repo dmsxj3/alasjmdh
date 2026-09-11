@@ -955,3 +955,35 @@ AzurLaneUncensored:
     display: disabled
 GameManager:
   AutoRestart: true
+ModHandler:
+  # 页面顶部的只读状态栏：由 module/webui/app.py 在打开本页时直读设备填入
+  CurrentState:
+    type: state
+    value: icon_unknown
+    option: [ icon_on, icon_off, icon_unknown, icon_unconfigured ]
+  Enabled: true
+  Backend:
+    value: prefs
+    option: [ prefs, ui ]
+  PackageName: com.bilibili.azurlane
+  PrefsFile: com.bilibili.azurlane_preferences
+  OffKeys: ''
+  OnKeys: ''
+  RestartTask:
+    value: always
+    option: [ sensitive_only, always, never ]
+  SensitiveTask:
+    value: disable_all_dangerous_task
+    option: [
+      disable_all_dangerous_task,
+      disable_guild_and_dangerous,
+      disable_meta_and_exercise,
+      disable_exercise,
+      enable_all,
+    ]
+  UiOpenPoint: ''
+  UiClosePoint: ''
+  UiOffLabels: ''
+  UiOnLabels: ''
+  UiTapPoints: ''
+  UiWaitTimeout: 5

@@ -12,6 +12,7 @@ from module.config.config import AzurLaneConfig, TaskEnd
 from module.config.deep import deep_get, deep_set
 from module.exception import *
 from module.logger import logger
+from module.mod_handler.mod_handler import ModHandler
 from module.notify import handle_notify
 
 
@@ -549,6 +550,8 @@ class AzurLaneAutoScript:
     def loop(self):
         logger.set_file_logger(self.config_name)
         logger.info(f'Start scheduler loop: {self.config_name}')
+        # 悬浮窗倍率：本次调度只做一次启动纠偏
+        startup_checked = False
 
         while 1:
             # Check update event from GUI
@@ -578,6 +581,20 @@ class AzurLaneAutoScript:
                 self.config.task_delay(server_update=True)
                 del_cached_property(self, 'config')
                 continue
+
+            # 按任务自动开关悬浮窗倍率：META / 演习 / 共斗 关闭，其他任务启用
+            try:
+                mod = ModHandler(config=self.config, device=self.device)
+                # 首次进入调度循环时先核一遍设备上真实的倍率状态：
+                # 上次停在敏感任务后用户手动开回倍率、又恰好接着跑常规任务的话，
+                # 这里会把状态纠回上次的决定，避免长时间带着倍率跑。
+                if not startup_checked:
+                    mod.check_on_startup()
+                    startup_checked = True
+                mod.check_then_set(inflection.underscore(task))
+            except Exception as e:
+                # 控制失败不应该拖垮整个调度，记录后继续跑任务
+                logger.warning(f'ModHandler: failed to apply multiplier policy: {e}')
 
             # Run
             logger.info(f'Scheduler: Start task `{task}`')

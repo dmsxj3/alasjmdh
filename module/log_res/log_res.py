@@ -38,7 +38,7 @@ class LogRes:
                     self.config.modified[_key_time] = _time
         else:
             logger.info('No such resource on dashboard')
-            super().__setattr__(name=key, value=value)
+            super().__setattr__(key, value)
 
     @cached_property
     def groups(self) -> dict:

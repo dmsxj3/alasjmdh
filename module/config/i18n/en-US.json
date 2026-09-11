@@ -35,6 +35,10 @@
     "Tool": {
       "name": "Tools",
       "help": ""
+    },
+    "ModHandler": {
+      "name": "Multiplier Control",
+      "help": ""
     }
   },
   "Task": {
@@ -308,6 +312,10 @@
     },
     "GameManager": {
       "name": "Game Manager(WIP)",
+      "help": ""
+    },
+    "ModHandler": {
+      "name": "Multiplier Control",
       "help": ""
     }
   },
@@ -3192,6 +3200,86 @@
     "AutoRestart": {
       "name": "Automatic Login",
       "help": "Log back into the game when the game has been ended."
+    }
+  },
+  "ModHandler": {
+    "_info": {
+      "name": "Floating menu multiplier control",
+      "help": "Automatically toggles the multiplier and other ship-stat features of the modded client\n(JMBQ / azurlan) floating menu, depending on the task about to run.\n\nDefault: multiplier is turned OFF for META (dossier beacon), Exercise and Raid,\nand turned ON for every other task.\nUsing a multiplier in those sensitive modes is the most common cause of bans,\nso keeping the default is recommended.\n\nNote: the floating menu stores its switches in SharedPreferences, keyed by numeric IDs.\nUse dev_tools/mod_discover.py to discover the mapping and fill in OffKeys / OnKeys."
+    },
+    "CurrentState": {
+      "name": "Current multiplier state",
+      "help": "Real state read straight from the game overlay config, refreshed when this page opens.\n\"On\" means the multiplier and other stat features are active, \"Off\" means disabled.\n\"Unknown\" means no root or the config cannot be read; \"Unconfigured\" means OffKeys / OnKeys are still empty.",
+      "icon_on": "ON - multiplier enabled",
+      "icon_off": "OFF - multiplier disabled",
+      "icon_unknown": "? cannot read state",
+      "icon_unconfigured": "! OffKeys / OnKeys not configured yet"
+    },
+    "Enabled": {
+      "name": "Enable multiplier control",
+      "help": "Master switch. When on, Alas toggles the multiplier automatically per task.\nWhen off, this feature does not touch the game at all."
+    },
+    "Backend": {
+      "name": "Control method",
+      "help": "prefs: edit the floating menu SharedPreferences via root. Most reliable, requires a rooted device (MuMu is rooted by default).\nui: click the switches with uiautomator2. No root needed, but fails if the overlay window is not in the accessibility tree.",
+      "prefs": "Edit prefs (needs root)",
+      "ui": "Click overlay (no root)"
+    },
+    "PackageName": {
+      "name": "Game package name",
+      "help": "Default com.bilibili.azurlane (CN). Use the package name of your server otherwise."
+    },
+    "PrefsFile": {
+      "name": "Prefs file name",
+      "help": "SharedPreferences file holding the overlay switches, without .xml.\nDefault com.bilibili.azurlane_preferences."
+    },
+    "OffKeys": {
+      "name": "Values when turning OFF",
+      "help": "Key/value pairs written when disabling the multiplier, such as 1=1,2=1,3=1 (a JSON object with quoted keys and values also works).\nDiscover them with dev_tools/mod_discover.py: snapshot, toggle the multiplier off manually, then diff."
+    },
+    "OnKeys": {
+      "name": "Values when turning ON",
+      "help": "Key/value pairs written when restoring the multiplier, such as 1=1000,2=1000,3=1000.\nUsed together with OffKeys."
+    },
+    "RestartTask": {
+      "name": "When to restart the game",
+      "help": "The game must be stopped before rewriting its preferences: it keeps the switches in memory, so editing the file while it runs is not picked up and gets overwritten when the app exits. This option decides whether the game is started again right away.\n\nAlways restart (recommended): on a real state change, stop -> write -> restart and wait for login. It only restarts when the state actually changes.\n\nSensitive tasks only: restart right away when the multiplier is turned off for Exercise / META / Raid; for other tasks only write the file and let Alas run its own Restart task.\n\nNever restart: never touch the game process, only write the file.\nTHIS DOES NOT ACTUALLY CHANGE THE MULTIPLIER - the game will not re-read the config, the change only takes effect after a natural game restart and may be overwritten by the running game.",
+      "sensitive_only": "Sensitive tasks only (Alas starts it otherwise)",
+      "always": "Always restart (recommended)",
+      "never": "Never restart (writes only, multiplier unchanged)"
+    },
+    "SensitiveTask": {
+      "name": "Tasks that disable the multiplier",
+      "help": "Sensitive modes = Raid / META / Exercise, where using a multiplier carries the highest ban risk.\nThe default \"dangerous tasks only\" is the recommended behaviour: META, Exercise and Raid off, everything else on.",
+      "disable_all_dangerous_task": "Dangerous tasks only (Raid/META/Exercise)",
+      "disable_guild_and_dangerous": "Dangerous tasks + Guild",
+      "disable_meta_and_exercise": "META and Exercise only",
+      "disable_exercise": "Exercise only",
+      "enable_all": "Everything allowed"
+    },
+    "UiOpenPoint": {
+      "name": "Tap to open the overlay",
+      "help": "ui backend only: tap this point to expand the overlay, such as 960,540.\nLeave empty if the panel is already expanded."
+    },
+    "UiClosePoint": {
+      "name": "Tap to close the overlay",
+      "help": "ui backend only: tap this point to collapse the overlay afterwards, such as 960,540. Empty means never collapse."
+    },
+    "UiOffLabels": {
+      "name": "Switch labels to turn OFF",
+      "help": "ui backend only: labels of the switches to set to OFF, comma separated.\nFor example: ATK/DEF multiplier,Reload multiplier"
+    },
+    "UiOnLabels": {
+      "name": "Switch labels to turn ON",
+      "help": "ui backend only: labels of the switches to set to ON when restoring, comma separated. Empty reuses the list above."
+    },
+    "UiTapPoints": {
+      "name": "Fallback coordinates",
+      "help": "ui backend only: tap coordinates used when a widget cannot be found, such as label=120,300;other=120,360"
+    },
+    "UiWaitTimeout": {
+      "name": "Widget wait timeout (s)",
+      "help": "ui backend only: seconds to wait for a widget to appear. Increase it on a slow device."
     }
   },
   "Storage": {
