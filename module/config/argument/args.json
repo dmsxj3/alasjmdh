@@ -10291,6 +10291,7 @@
         "type": "select",
         "value": "prefs",
         "option": [
+          "overlay",
           "prefs",
           "ui"
         ]
@@ -10303,6 +10304,22 @@
         "type": "input",
         "value": "com.bilibili.azurlane_preferences"
       },
+      "OverlayService": {
+        "type": "input",
+        "value": "com.android.support.Launcher"
+      },
+      "OverlaySurvivalSeconds": {
+        "type": "input",
+        "value": 20
+      },
+      "OverlayVisualVerify": {
+        "type": "checkbox",
+        "value": true
+      },
+      "OverlayFallbackPrefs": {
+        "type": "checkbox",
+        "value": true
+      },
       "OffKeys": {
         "type": "input",
         "value": "1=1,2=1,3=1,35=false"
@@ -10310,15 +10327,6 @@
       "OnKeys": {
         "type": "input",
         "value": "1=1000,2=1000,3=1000,35=true"
-      },
-      "RestartTask": {
-        "type": "select",
-        "value": "always",
-        "option": [
-          "sensitive_only",
-          "always",
-          "never"
-        ]
       },
       "SensitiveTask": {
         "type": "select",

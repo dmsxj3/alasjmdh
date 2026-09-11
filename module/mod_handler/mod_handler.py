@@ -324,7 +324,7 @@ class ModHandler(ModuleBase):
     @property
     def backend(self):
         return str(deep_get(self.config.data, 'ModHandler.ModHandler.Backend',
-                            default='prefs') or 'prefs')
+                            default='overlay') or 'overlay')
 
     @property
     def sensitive_option(self):
@@ -344,7 +344,9 @@ class ModHandler(ModuleBase):
 
     @property
     def keys_configured(self):
-        """OffKeys / OnKeys 是否至少配了一个，没配时本功能只会打日志。"""
+        """OffKeys / OnKeys 是否至少配了一个，没配时本功能只会打日志。
+        overlay 后端靠「点哪个数字/开关」定位，不写 prefs 键，但目标值仍来自
+        OffKeys / OnKeys（决定输入框里填几），所以这里同样要求已配置。"""
         return bool(self.off_keys or self.on_keys)
 
     # ------------------------------------------------------------ 状态落盘
@@ -390,7 +392,10 @@ class ModHandler(ModuleBase):
     def _backend(self):
         """按配置实例化后端，复用实例避免重复连接设备。"""
         if self._backend_obj is None:
-            if self.backend == 'ui':
+            if self.backend == 'overlay':
+                from module.mod_handler.mod_overlay import ModOverlay
+                self._backend_obj = ModOverlay(config=self.config, device=self.device)
+            elif self.backend == 'ui':
                 from module.mod_handler.mod_ui import ModUi
                 self._backend_obj = ModUi(config=self.config, device=self.device)
             else:
@@ -623,13 +628,16 @@ class ModHandler(ModuleBase):
 
         # 敏感任务 = 必须关闭倍率的任务。AlasGG 的 GGHandler 在这里会 gg_reset()，
         # 也就是关掉 GG 并重启游戏，保证"关"一定生效。
-        # 重启与否统一由 _restart_for 按 ModHandler.RestartTask 决定。
+        # overlay 后端：调起悬浮窗点数字/开关，mod 直接改内存并落盘，零重启；
+        # prefs 后端：重启与否统一由 _restart_for 按 RestartTask 决定。
         sensitive = task in disabled
         restart = self._restart_for(want_on, sensitive=sensitive)
 
         if sensitive:
             logger.warning(f'敏感任务 `{task}`：'
-                           f'{"关闭倍率并重启游戏以确保生效" if restart else "关闭倍率"}')
+                           + ('关闭倍率（悬浮窗点击，立即生效，不重启）'
+                              if self.backend == 'overlay' else
+                              ('关闭倍率并重启游戏以确保生效' if restart else '关闭倍率')))
         else:
             logger.info(f'Task `{task}` -> multiplier should be '
                         f'{"ON" if want_on else "OFF"} '

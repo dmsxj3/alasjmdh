@@ -3221,9 +3221,10 @@
     },
     "Backend": {
       "name": "Control method",
-      "help": "prefs: edit the floating menu SharedPreferences via root. Most reliable, requires a rooted device (MuMu is rooted by default).\nui: click the switches with uiautomator2. No root needed, but fails if the overlay window is not in the accessibility tree.",
-      "prefs": "Edit prefs (needs root)",
-      "ui": "Click overlay (no root)"
+      "help": "[Default is prefs, safer] overlay achieves zero restart, but it CAN CRASH THE GAME on some\\nx86_64 builds of the mod: when the game process is not running, am startservice spawns a new process\\nwhere Launcher.onCreate -> new Menu -> Menu.Icon() throws UnsatisfiedLinkError and the whole game\\nprocess dies (observed: am_crash + am_proc_died).\\nGuarded here: summon only while the game process is alive; on any pid change it permanently disables\\noverlay and falls back to prefs.\\noverlay (recommended): root adb restarts the mod's spare Service so the overlay reappears, then Alas clicks the number after each multiplier, types an exact value in the dialog and flips the \"yi de fu ren\" switch. The mod applies it in memory and persists it - **zero game restart**. The overlay then kills itself after -98 seconds.\\nprefs: edit the shared-prefs XML directly; needs the game stopped and a restart to apply.\\nui: click overlay widgets with uiautomator2 (the overlay is usually not in the a11y tree).",
+      "prefs": "Edit shared prefs (restart required)",
+      "ui": "Click overlay widgets (no root)",
+      "overlay": "Drive the overlay (zero restart, recommended)"
     },
     "PackageName": {
       "name": "Game package name",
@@ -3240,13 +3241,6 @@
     "OnKeys": {
       "name": "Values when turning ON",
       "help": "Key/value pairs written when restoring the multiplier, such as 1=1000,2=1000,3=1000,35=true.\nUsed together with OffKeys; defaults already match the official-server JMBQ 3.4.0 mapping."
-    },
-    "RestartTask": {
-      "name": "When to restart the game",
-      "help": "The game must be stopped before rewriting its preferences: it keeps the switches in memory, so editing the file while it runs is not picked up and gets overwritten when the app exits. This option decides whether the game is started again right away.\n\nAlways restart (recommended): on a real state change, stop -> write -> restart and wait for login. It only restarts when the state actually changes.\n\nSensitive tasks only: restart right away when the multiplier is turned off for Exercise / META / Raid; for other tasks only write the file and let Alas run its own Restart task.\n\nNever restart: never touch the game process, only write the file.\nTHIS DOES NOT ACTUALLY CHANGE THE MULTIPLIER - the game will not re-read the config, the change only takes effect after a natural game restart and may be overwritten by the running game.",
-      "sensitive_only": "Sensitive tasks only (Alas starts it otherwise)",
-      "always": "Always restart (recommended)",
-      "never": "Never restart (writes only, multiplier unchanged)"
     },
     "SensitiveTask": {
       "name": "Tasks that disable the multiplier",
@@ -3280,6 +3274,22 @@
     "UiWaitTimeout": {
       "name": "Widget wait timeout (s)",
       "help": "ui backend only: seconds to wait for a widget to appear. Increase it on a slow device."
+    },
+    "OverlayService": {
+      "name": "Overlay summon service",
+      "help": "A spare Service registered by the mod that is normally never used. With root, stopservice + startservice makes the overlay reappear.\\nIt must be stop-then-start: while the Service is alive, startservice only triggers onStartCommand and the window is not rebuilt.\\nDefault com.android.support.Launcher (verified on MOD_MENU 3.4.0)."
+    },
+    "OverlaySurvivalSeconds": {
+      "name": "Overlay survival seconds (fallback)",
+      "help": "Maps to the mod's internal prefs key -98 (settable in the mod panel, 0-20).\\nAlas prefers the real -98 read from the device and only uses this value when unreadable.\\nAfter each change Alas waits until the overlay kills itself (-98 + 4s) so it cannot interfere with screenshot recognition. Default 20."
+    },
+    "OverlayVisualVerify": {
+      "name": "Visual verification",
+      "help": "On (default): besides the authoritative XML check, take a screenshot as a second opinion - template match for the switch graphic and OCR for the three multipliers.\\nIf recognition is unavailable it does not count as a failure; the XML check stays authoritative."
+    },
+    "OverlayFallbackPrefs": {
+      "name": "Fallback to prefs on failure",
+      "help": "On (default): when the overlay path cannot be confirmed, fall back to editing the shared-prefs XML, which needs a game restart.\\nThis is a safety net: one extra restart is far better than letting a sensitive task (Exercise / META / Coalition) run with the multiplier on.\\nTurn it off and a failure only logs CRITICAL without restarting."
     }
   },
   "Storage": {
