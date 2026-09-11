@@ -963,15 +963,16 @@ ModHandler:
     option: [ icon_on, icon_off, icon_unknown, icon_unconfigured ]
   Enabled: true
   Backend:
-    value: prefs
-    option: [ prefs, ui ]
+    value: overlay
+    option: [ overlay, prefs, ui ]
   PackageName: com.bilibili.azurlane
   PrefsFile: com.bilibili.azurlane_preferences
-  OffKeys: ''
-  OnKeys: ''
-  RestartTask:
-    value: always
-    option: [ sensitive_only, always, never ]
+  OverlayService: com.android.support.Launcher
+  OverlaySurvivalSeconds: 20
+  OverlayVisualVerify: true
+  OverlayFallbackPrefs: false
+  OffKeys: '1=1,2=1,3=1,35=false'
+  OnKeys: '1=1000,2=1000,3=1000,35=true'
   SensitiveTask:
     value: disable_all_dangerous_task
     option: [

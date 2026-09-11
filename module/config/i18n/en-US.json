@@ -3240,15 +3240,23 @@
     },
     "OverlaySurvivalSeconds": {
       "name": "Overlay survival seconds",
-      "help": "Mod internal prefs key -98. Written via root when the game is not running, effective after next start;\nvalues below 5 are reset to 20 by the mod. Default 20: after each multiplier switch, Alas waits for the\noverlay to die by itself (up to 20s) and confirms a clean screen before continuing."
+      "help": "Mod internal prefs key -98, also editable on the mod panel's settings page.\nAlas prefers the real -98 read from the device and only falls back to this value; when the game is closed it also writes the prefs to this value.\nThe panel re-arms its timer on every touch, so it never dies mid-operation; Alas waits for it to die by itself before continuing. Default 20."
+    },
+    "OverlayVisualVerify": {
+      "name": "Screenshot verification",
+      "help": "On (default): besides the authoritative XML check, take a screenshot as a second opinion - locate the slider thumbs to derive the three multipliers, and sample the switch colours.\nThis is informational only: unreadable results never count as a failure; XML stays authoritative."
+    },
+    "OverlayFallbackPrefs": {
+      "name": "Fallback to prefs on failure",
+      "help": "Off (default): when the overlay path cannot be confirmed, only a CRITICAL log is written and the game is never restarted.\nTurn it on for a safety net: fall back to editing the shared-prefs XML (needs a restart) so a sensitive task never runs with the multiplier on. Enable at your own discretion."
     },
     "OffKeys": {
       "name": "Values when turning OFF",
-      "help": "Key/value pairs written when disabling the multiplier, such as 1=1,2=1,3=1 (a JSON object with quoted keys and values also works).\nDiscover them with dev_tools/mod_discover.py: snapshot, toggle the multiplier off manually, then diff."
+      "help": "Key/value pairs such as 1=1,2=1,3=1,35=false: keys 1/2/3 are attack/defense/reload multipliers (off=1, on=1000) and key 35 is the master switch (false=off).\nDefaults were verified on a real device and work out of the box; to customize run dev_tools/mod_discover.py (snapshot -> change manually -> diff)."
     },
     "OnKeys": {
       "name": "Values when turning ON",
-      "help": "Key/value pairs written when restoring the multiplier, such as 1=1000,2=1000,3=1000.\nUsed together with OffKeys."
+      "help": "Key/value pairs such as 1=1000,2=1000,3=1000,35=true: multipliers back to 1000 and the master switch on.\nUsed together with OffKeys."
     },
     "SensitiveTask": {
       "name": "Tasks that disable the multiplier",
