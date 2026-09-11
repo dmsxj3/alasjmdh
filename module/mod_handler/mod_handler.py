@@ -17,6 +17,44 @@ ModHandler — 改版客户端（JMBQ / azurlan）悬浮窗倍率控制。
     避免未知任务把敏感任务的关闭状态顶掉（例如共斗之后紧跟 daily）。
 
 敏感任务分组与 AlasGG 的 GGHandler.check_then_set_gg_status 保持一致，便于对照。
+
+=====================================================================
+2026-09-11 反编译实测（AL_Mod_Maker 3.2.1 的 assets/dex + 官服 JMBQ 3.4.0）
+=====================================================================
+下面这些结论决定了默认键位的取值，以及「为什么改完配置必须重启游戏」。
+
+1. 配置文件名由 com.android.support.Preferences.<init> 决定：
+       context.getSharedPreferences(getPackageName() + "_preferences", 0)
+   官服即 /data/data/com.bilibili.azurlane/shared_prefs/com.bilibili.azurlane_preferences.xml
+   （PackageName / PrefsFile 的默认值即由此而来。）
+
+2. 功能以「数字 ID」作 key。读设备 XML 逐项对照后的实体含义：
+       1 / 2 / 3 = 倍率（关 = 1，开 = 1000）
+       35        = 以德服人（关 = false，开 = true）
+       21~32     = 其余开关（移除动画、解锁皮肤之类）
+       -3 / -4   = 内部状态
+       -98       = 悬浮窗自动关闭秒数（默认 10）
+   OffKeys / OnKeys 的出厂默认值就是这一组。
+
+3. 为什么改完配置必须重启游戏（是 mod 机制决定的，不是偷懒）：
+   写入路径：Menu 的 onCheckedChanged -> Preferences.changeFeatureBool
+                -> Preferences.writeBoolean(...)      写 SharedPreferences
+                -> Preferences.Changes(context, ...)  native，把改动真正应用到 hook
+   读取路径：Preferences.loadPrefBool() 读的是**同一进程内的 SharedPreferences 实例**；
+             Android 的 SharedPreferences 只在进程首次访问时读盘，之后全走内存缓存。
+   ⇒ 从外部改 XML，游戏进程读不到（内存里还是旧值），
+     且游戏下一次 commit/apply 会把文件覆盖回去。
+   ⇒ 所以：写入前必须先停游戏；改动只在游戏下次启动读配置时生效。
+   ⇒ 「状态真的变化 = 一次游戏重启」是这套机制的硬下限；
+     本模块的职责是保证**只有状态真的变化时才重启**，不产生多余重启。
+
+4. 悬浮窗本体（com.android.support.Menu）：
+   - 由注入游戏进程的代码创建，是 WindowManager 的 overlay，不在 uiautomator2
+     辅助功能树里，读不到也点不到它的控件；
+   - 自动关闭时间就是上面的 -98（用户实测设为 10 秒，避免遮挡 Alas 截图识别）；
+   - 该 overlay 没有注册进游戏 AndroidManifest（dumpsys package 里查不到
+     com.android.support.* 组件），外部无法用 am start/broadcast 唤出。
+   ⇒ prefs 是唯一可靠的控制通道；ui 后端只在特定改版包上可能可用。
 """
 import json
 import os
@@ -447,15 +485,36 @@ class ModHandler(ModuleBase):
         """
         policy = self.restart_policy
         if policy == 'never':
-            return 'no_stop'
-        if policy == 'always':
-            return True
+            decision = 'no_stop'
+        elif policy == 'always':
+            decision = True
         # sensitive_only：敏感任务关倍率(关)时必须立刻重启保证生效；
         # 开倍率不赶时间 —— 停游戏写文件即可，让 ALAS 下次自己启动，
         # 这样不会为了"开倍率"多出一次重启。
-        if sensitive and not mode:
-            return True
-        return False
+        elif sensitive and not mode:
+            decision = True
+        else:
+            decision = False
+
+        # 审计日志：把「这一次为什么重启 / 为什么不重启」写清楚。
+        # 事后核对「有没有多余重启」时，直接 grep 这一行即可：
+        #   grep 'ModHandler.restart' log/*.txt
+        # 正常一整天里，RESTART 的次数应当恰好等于「倍率状态真的翻转」的次数。
+        if decision == 'no_stop':
+            reason = 'RestartTask=never，完全不动游戏进程'
+            verdict = 'NO_STOP'
+        elif decision:
+            reason = ('RestartTask=always' if policy == 'always'
+                      else '敏感任务需关倍率，立即重启以确保生效')
+            verdict = 'RESTART'
+        else:
+            reason = ('RestartTask=sensitive_only 且本次为开倍率/非敏感，'
+                      '只停游戏写配置，启动交给 Alas，不额外重启')
+            verdict = 'NO_RESTART'
+        logger.attr('ModHandler.restart',
+                    f'{verdict} (task={"sensitive" if sensitive else "normal"}, '
+                    f'target={"ON" if mode else "OFF"}, policy={policy}) - {reason}')
+        return decision
 
     @property
     def restart_policy(self):

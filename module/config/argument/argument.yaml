@@ -967,8 +967,8 @@ ModHandler:
     option: [ prefs, ui ]
   PackageName: com.bilibili.azurlane
   PrefsFile: com.bilibili.azurlane_preferences
-  OffKeys: ''
-  OnKeys: ''
+  OffKeys: '1=1,2=1,3=1,35=false'
+  OnKeys: '1=1000,2=1000,3=1000,35=true'
   RestartTask:
     value: always
     option: [ sensitive_only, always, never ]

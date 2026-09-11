@@ -580,8 +580,8 @@ class GeneratedConfig:
     ModHandler_Backend = 'prefs'  # prefs, ui
     ModHandler_PackageName = 'com.bilibili.azurlane'
     ModHandler_PrefsFile = 'com.bilibili.azurlane_preferences'
-    ModHandler_OffKeys = None
-    ModHandler_OnKeys = None
+    ModHandler_OffKeys = '1=1,2=1,3=1,35=false'
+    ModHandler_OnKeys = '1=1000,2=1000,3=1000,35=true'
     ModHandler_RestartTask = 'always'  # sensitive_only, always, never
     ModHandler_SensitiveTask = 'disable_all_dangerous_task'  # disable_all_dangerous_task, disable_guild_and_dangerous, disable_meta_and_exercise, disable_exercise, enable_all
     ModHandler_UiOpenPoint = None
