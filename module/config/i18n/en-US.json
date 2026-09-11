@@ -3240,7 +3240,7 @@
     },
     "OverlaySurvivalSeconds": {
       "name": "Overlay survival seconds",
-      "help": "Mod internal prefs key -98. Written via root when the game is not running, effective after next start;\nvalues below 5 are reset to 20 by the mod. Default 8: template matching takes 3-4s,\nthe overlay disappears a few seconds after the click."
+      "help": "Mod internal prefs key -98. Written via root when the game is not running, effective after next start;\nvalues below 5 are reset to 20 by the mod. Default 20: after each multiplier switch, Alas waits for the\noverlay to die by itself (up to 20s) and confirms a clean screen before continuing."
     },
     "OffKeys": {
       "name": "Values when turning OFF",

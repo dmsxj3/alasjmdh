@@ -10314,7 +10314,7 @@
       },
       "OverlaySurvivalSeconds": {
         "type": "input",
-        "value": 8
+        "value": 20
       },
       "OffKeys": {
         "type": "input",

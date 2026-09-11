@@ -581,7 +581,7 @@ class GeneratedConfig:
     ModHandler_PackageName = 'com.bilibili.azurlane'
     ModHandler_PrefsFile = 'com.bilibili.azurlane_preferences'
     ModHandler_OverlayService = 'com.android.support.Launcher'
-    ModHandler_OverlaySurvivalSeconds = 8
+    ModHandler_OverlaySurvivalSeconds = 20
     ModHandler_OffKeys = None
     ModHandler_OnKeys = None
     ModHandler_RestartTask = 'always'  # sensitive_only, always, never

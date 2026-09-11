@@ -64,9 +64,9 @@ class ModOverlay(ModuleBase):
     def survival_seconds(self):
         try:
             return int(deep_get(self.config.data, 'ModHandler.ModHandler.OverlaySurvivalSeconds',
-                                default=8) or 8)
+                                default=20) or 20)
         except (TypeError, ValueError):
-            return 8
+            return 20
 
     @property
     def prefs_reader(self):

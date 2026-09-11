@@ -484,17 +484,6 @@ class ModHandler(ModuleBase):
         except TypeError:
             # 老签名（或第三方后端）不接受 restart 参数
             result = self._backend.set_multiplier(mode)
-        # overlay 后端失败（调不起悬浮窗 / 模板缺失 / 验态失败）时，
-        # 自动降级到 prefs 后端（写 XML + 按 RestartTask 策略重启），保底生效。
-        if not result and self.backend == 'overlay':
-            logger.warning('ModHandler: overlay backend failed, '
-                           'falling back to prefs backend (game restart may happen)')
-            from module.mod_handler.mod_prefs import ModPrefs
-            prefs = ModPrefs(config=self.config, device=self.device)
-            try:
-                result = prefs.set_multiplier(mode, restart=restart)
-            except TypeError:
-                result = prefs.set_multiplier(mode)
         if result:
             logger.attr('ModHandler', f'multiplier {"ON" if mode else "OFF"}')
         return bool(result)
