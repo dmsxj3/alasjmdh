@@ -220,23 +220,28 @@ class ModOverlay(ModuleBase):
 
     def _wait_overlay_gone(self, tpls, timeout=None):
         """
-        等悬浮窗按 -98 秒自杀（识图确认），屏幕干净后才返回。
-        悬浮窗从未出现时第一次检查即返回，不浪费时间。
-        Returns:
-            bool: True = 悬浮窗已消失
+        确保悬浮窗被杀死（removeView）后再返回，杜绝 ALAS 误触。
+
+        阶段 1 固定等待 survival_seconds 秒：mod 的存活计时从悬浮窗出现那一刻起算
+        （ShowMenu 里 postDelayed 先于 addView），点击完成时已过去约 3-5 秒，
+        因此再等满 survival_seconds 必然超过存活期，Menu$1 的
+        mWindowManager.removeView(rootFrame) 已执行 —— 是真杀死而非隐藏
+        （Launcher 每秒轮询的 setVisibility 对已移除的 view 无效，不会复活）。
+
+        阶段 2 识图复核：确认窗口确实不在屏幕上；若 mod 异常未杀死，
+        最多再等 15 秒兜底。
         """
-        if timeout is None:
-            timeout = self.survival_seconds + 5
-        deadline = time.time() + timeout
+        time.sleep(self.survival_seconds)
+        deadline = time.time() + 15
         while time.time() < deadline:
             try:
                 if not self._overlay_visible(tpls, self.device.screenshot()):
-                    logger.attr('ModOverlay', 'overlay gone, screen clean')
+                    logger.attr('ModOverlay', f'overlay killed after {self.survival_seconds}s, screen clean')
                     return True
             except Exception:
                 pass
             time.sleep(0.5)
-        logger.warning(f'ModOverlay: overlay still visible after {timeout}s (dies on its own)')
+        logger.warning(f'ModOverlay: overlay still visible after {self.survival_seconds}+15s')
         return False
 
     def set_multiplier(self, mode: bool, restart=None):
