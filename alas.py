@@ -579,6 +579,10 @@ class AzurLaneAutoScript:
                 del_cached_property(self, 'config')
                 continue
 
+            # JMBQ mod: ensure multiplier before task (overlay automation)
+            from module.jmbq.multiplier import jmbq_ensure_multiplier
+            jmbq_ensure_multiplier(self.device, task)
+
             # Run
             logger.info(f'Scheduler: Start task `{task}`')
             self.device.stuck_record_clear()
