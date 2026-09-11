@@ -286,7 +286,7 @@ class ModHandler(ModuleBase):
     @property
     def backend(self):
         return str(deep_get(self.config.data, 'ModHandler.ModHandler.Backend',
-                            default='prefs') or 'prefs')
+                            default='overlay') or 'overlay')
 
     @property
     def sensitive_option(self):
@@ -306,7 +306,10 @@ class ModHandler(ModuleBase):
 
     @property
     def keys_configured(self):
-        """OffKeys / OnKeys 是否至少配了一个，没配时本功能只会打日志。"""
+        """OffKeys / OnKeys 是否至少配了一个，没配时本功能只会打日志。
+        overlay 后端不写 prefs 键（识图点击开关，由 mod 自身落盘），不需要这两个配置。"""
+        if self.backend == 'overlay':
+            return True
         return bool(self.off_keys or self.on_keys)
 
     # ------------------------------------------------------------ 状态落盘
@@ -352,7 +355,10 @@ class ModHandler(ModuleBase):
     def _backend(self):
         """按配置实例化后端，复用实例避免重复连接设备。"""
         if self._backend_obj is None:
-            if self.backend == 'ui':
+            if self.backend == 'overlay':
+                from module.mod_handler.mod_overlay import ModOverlay
+                self._backend_obj = ModOverlay(config=self.config, device=self.device)
+            elif self.backend == 'ui':
                 from module.mod_handler.mod_ui import ModUi
                 self._backend_obj = ModUi(config=self.config, device=self.device)
             else:
@@ -478,6 +484,17 @@ class ModHandler(ModuleBase):
         except TypeError:
             # 老签名（或第三方后端）不接受 restart 参数
             result = self._backend.set_multiplier(mode)
+        # overlay 后端失败（调不起悬浮窗 / 模板缺失 / 验态失败）时，
+        # 自动降级到 prefs 后端（写 XML + 按 RestartTask 策略重启），保底生效。
+        if not result and self.backend == 'overlay':
+            logger.warning('ModHandler: overlay backend failed, '
+                           'falling back to prefs backend (game restart may happen)')
+            from module.mod_handler.mod_prefs import ModPrefs
+            prefs = ModPrefs(config=self.config, device=self.device)
+            try:
+                result = prefs.set_multiplier(mode, restart=restart)
+            except TypeError:
+                result = prefs.set_multiplier(mode)
         if result:
             logger.attr('ModHandler', f'multiplier {"ON" if mode else "OFF"}')
         return bool(result)

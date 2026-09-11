@@ -10293,8 +10293,9 @@
       },
       "Backend": {
         "type": "select",
-        "value": "prefs",
+        "value": "overlay",
         "option": [
+          "overlay",
           "prefs",
           "ui"
         ]
@@ -10306,6 +10307,14 @@
       "PrefsFile": {
         "type": "input",
         "value": "com.bilibili.azurlane_preferences"
+      },
+      "OverlayService": {
+        "type": "input",
+        "value": "com.android.support.Launcher"
+      },
+      "OverlaySurvivalSeconds": {
+        "type": "input",
+        "value": 8
       },
       "OffKeys": {
         "type": "input",

@@ -3221,9 +3221,10 @@
     },
     "Backend": {
       "name": "制御方式",
-      "help": "prefs：root で SharedPreferences を直接書き換えます。最も確実で root が必要です（MuMu は既定で root 可）。\nui：uiautomator2 でスイッチをタップします。root 不要ですが、オーバーレイがアクセシビリティツリーに無い場合は失敗します。",
-      "prefs": "設定ファイルを書き換え（root 必須）",
-      "ui": "オーバーレイをタップ（root 不要）"
+      "help": "overlay（推奨）：root adb でオーバーレイの待機 Service を起動し、テンプレートマッチングで倍率スイッチをタップします。\nmod がメモリを直接書き換えるため即時有効・再起動不要。タップ後オーバーレイは自動で消えます。\n起動できない場合は自動で prefs にフォールバックします。\nprefs：root で SharedPreferences を直接書き換えます。ゲーム再起動が必要です。\nui：uiautomator2 でスイッチをタップしますが、オーバーレイがアクセシビリティツリーに無い場合は失敗します。",
+      "overlay": "オーバーレイを表示してタップ（再起動不要・推奨）",
+      "prefs": "設定ファイルを書き換え（再起動が必要）",
+      "ui": "オーバーレイのウィジェットをタップ（root 不要）"
     },
     "PackageName": {
       "name": "ゲームのパッケージ名",
@@ -3232,6 +3233,14 @@
     "PrefsFile": {
       "name": "設定ファイル名",
       "help": "フローティングメニューのスイッチを保存する SharedPreferences のファイル名（.xml を除く）。\n既定は com.bilibili.azurlane_preferences。"
+    },
+    "OverlayService": {
+      "name": "オーバーレイ起動コンポーネント",
+      "help": "mod に登録されているが未使用のバックアップ Service。root adb（MuMu 既定）は\nexported=false を回避して起動でき、オーバーレイが再表示されます。\n既定は com.android.support.Launcher（MOD_MENU 3.4.0 で確認）。"
+    },
+    "OverlaySurvivalSeconds": {
+      "name": "オーバーレイ生存秒数",
+      "help": "mod 内部 prefs キー -98 に対応。ゲーム未起動時に Alas が root で書き込み、次回起動時に有効；\n5 未満は mod により 20 にリセットされます。既定 8：マッチングに 3-4 秒、\nタップ後数秒でオーバーレイは自動消滅します。"
     },
     "OffKeys": {
       "name": "倍率オフ時に書き込む値",

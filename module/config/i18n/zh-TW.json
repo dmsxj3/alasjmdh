@@ -3221,9 +3221,10 @@
     },
     "Backend": {
       "name": "控制方式",
-      "help": "prefs：透過 root 直接改懸浮窗的 SharedPreferences，最穩定，需要裝置已 root（MuMu 預設可用）。\nui：用 uiautomator2 點懸浮窗開關，不需要 root，但懸浮窗若不在輔助功能樹裡會失敗。",
-      "prefs": "改設定檔（需 root）",
-      "ui": "點懸浮窗（免 root）"
+      "help": "overlay（建議）：root adb 呼叫懸浮窗備用元件，以圖片比對點擊「以德服人」開關，\nmod 直接改記憶體立即生效，零重啟；點完懸浮窗自動消失。\n呼不起或模板缺失時自動降級為 prefs。\nprefs：透過 root 直接改懸浮窗的 SharedPreferences，需要重啟遊戲才生效。\nui：用 uiautomator2 點懸浮窗開關，但懸浮窗若不在輔助功能樹裡會失敗。",
+      "overlay": "呼叫懸浮窗點擊（零重啟，建議）",
+      "prefs": "改設定檔（需重啟生效）",
+      "ui": "點懸浮窗元件（免 root）"
     },
     "PackageName": {
       "name": "遊戲套件名稱",
@@ -3232,6 +3233,14 @@
     "PrefsFile": {
       "name": "設定檔名稱",
       "help": "懸浮窗存放開關的 SharedPreferences 檔名（不含 .xml）。\n預設 com.bilibili.azurlane_preferences。"
+    },
+    "OverlayService": {
+      "name": "懸浮窗呼叫元件",
+      "help": "mod 裡註冊但未被呼叫的備用 Service。root adb（MuMu 預設）可繞過\nexported=false 直接呼叫，懸浮窗隨之重新出現。\n預設 com.android.support.Launcher（MOD_MENU 3.4.0 實測）。"
+    },
+    "OverlaySurvivalSeconds": {
+      "name": "懸浮窗存活秒數",
+      "help": "對應 mod 內部 prefs 鍵 -98。遊戲未執行時由 Alas root 寫入，下次啟動生效；\n小於 5 會被 mod 重設為 20。預設 8：圖片比對約需 3-4 秒，點完幾秒內懸浮窗自動消失。"
     },
     "OffKeys": {
       "name": "關閉倍率時寫入",

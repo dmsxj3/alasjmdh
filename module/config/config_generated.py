@@ -577,9 +577,11 @@ class GeneratedConfig:
     # Group `ModHandler`
     ModHandler_CurrentState = 'icon_unknown'  # icon_on, icon_off, icon_unknown, icon_unconfigured
     ModHandler_Enabled = True
-    ModHandler_Backend = 'prefs'  # prefs, ui
+    ModHandler_Backend = 'overlay'  # overlay, prefs, ui
     ModHandler_PackageName = 'com.bilibili.azurlane'
     ModHandler_PrefsFile = 'com.bilibili.azurlane_preferences'
+    ModHandler_OverlayService = 'com.android.support.Launcher'
+    ModHandler_OverlaySurvivalSeconds = 8
     ModHandler_OffKeys = None
     ModHandler_OnKeys = None
     ModHandler_RestartTask = 'always'  # sensitive_only, always, never

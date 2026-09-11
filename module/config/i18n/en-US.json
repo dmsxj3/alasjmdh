@@ -3221,9 +3221,10 @@
     },
     "Backend": {
       "name": "Control method",
-      "help": "prefs: edit the floating menu SharedPreferences via root. Most reliable, requires a rooted device (MuMu is rooted by default).\nui: click the switches with uiautomator2. No root needed, but fails if the overlay window is not in the accessibility tree.",
-      "prefs": "Edit prefs (needs root)",
-      "ui": "Click overlay (no root)"
+      "help": "overlay (recommended): root adb starts the dormant overlay service, taps the multiplier switch by template matching.\nThe mod patches memory directly, effective immediately with zero restarts; the overlay dies on its own afterwards.\nFalls back to prefs automatically when the overlay cannot be shown.\nprefs: edit the floating menu SharedPreferences via root, but the change needs a game restart.\nui: click the switches with uiautomator2. No root needed, but fails if the overlay window is not in the accessibility tree.",
+      "overlay": "Show overlay and tap (zero restart, recommended)",
+      "prefs": "Edit prefs (needs restart)",
+      "ui": "Click overlay widgets (no root)"
     },
     "PackageName": {
       "name": "Game package name",
@@ -3232,6 +3233,14 @@
     "PrefsFile": {
       "name": "Prefs file name",
       "help": "SharedPreferences file holding the overlay switches, without .xml.\nDefault com.bilibili.azurlane_preferences."
+    },
+    "OverlayService": {
+      "name": "Overlay service component",
+      "help": "A registered-but-never-started backup service in the mod. Root adb (MuMu default)\nbypasses exported=false and starts it, which re-shows the floating menu.\nDefault com.android.support.Launcher (verified on MOD_MENU 3.4.0)."
+    },
+    "OverlaySurvivalSeconds": {
+      "name": "Overlay survival seconds",
+      "help": "Mod internal prefs key -98. Written via root when the game is not running, effective after next start;\nvalues below 5 are reset to 20 by the mod. Default 8: template matching takes 3-4s,\nthe overlay disappears a few seconds after the click."
     },
     "OffKeys": {
       "name": "Values when turning OFF",
