@@ -585,7 +585,7 @@ class AzurLaneAutoScript:
             # 按任务自动开关悬浮窗倍率：META / 演习 / 共斗 关闭，其他任务启用
             try:
                 mod = ModHandler(config=self.config, device=self.device)
-                # 首次进入调度循环时先核对一遍设备上真实的倍率状态：
+                # 首次进入调度循环时先核一遍设备上真实的倍率状态：
                 # 上次停在敏感任务后用户手动开回倍率、又恰好接着跑常规任务的话，
                 # 这里会把状态纠回上次的决定，避免长时间带着倍率跑。
                 if not startup_checked:
