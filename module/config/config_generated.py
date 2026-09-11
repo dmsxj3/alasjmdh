@@ -584,7 +584,6 @@ class GeneratedConfig:
     ModHandler_OverlaySurvivalSeconds = 20
     ModHandler_OffKeys = None
     ModHandler_OnKeys = None
-    ModHandler_RestartTask = 'always'  # sensitive_only, always, never
     ModHandler_SensitiveTask = 'disable_all_dangerous_task'  # disable_all_dangerous_task, disable_guild_and_dangerous, disable_meta_and_exercise, disable_exercise, enable_all
     ModHandler_UiOpenPoint = None
     ModHandler_UiClosePoint = None

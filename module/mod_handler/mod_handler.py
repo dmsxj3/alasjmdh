@@ -425,57 +425,15 @@ class ModHandler(ModuleBase):
             logger.attr('ModHandler', f'repaired to {"ON" if mode else "OFF"}')
         return bool(result)
 
-    def _restart_for(self, mode: bool, sensitive: bool):
-        """
-        决定这次写入对游戏进程做什么。必须统一走这里，不能在调用点硬编码 ——
-        否则 RestartTask 会被无视，表现为"设了不重启却还是重启"。
-
-        三种结果的真实含义（2026-09-11 实测后定型）：
-            True  停游戏 -> 写文件 -> 立刻重启并等登录
-                  倍率这次就一定生效。代价是一次游戏重启。
-            False 停游戏 -> 写文件，启动交给 ALAS
-                  ALAS 下个任务发现游戏没运行会自己排 Restart，所以最终还是会重启
-                  一次，只是晚一点、并且和 ALAS 自己的重启合并。不会多出额外的重启。
-            'no_stop' 完全不动游戏，只写文件
-
-        关于 never：早期实现是"停游戏、不拉起来"，结果游戏一直关着，
-        ALAS 每个任务都 GameNotRunningError -> task_call('Restart')，
-        把重启推到了下一个任务边界，看起来就是"设了不重启反而重启更多"。
-        现在 never 直接不碰游戏进程：不停、不写坏、也不重启。
-        代价是游戏运行中读内存副本，这次改动要等它自然重启才生效 ——
-        配置页文案已写明。
-
-        Args:
-            mode: 目标状态，True = 开倍率
-            sensitive: 当前是不是敏感任务
-        Returns:
-            True / False / 'no_stop'
-        """
-        policy = self.restart_policy
-        if policy == 'never':
-            return 'no_stop'
-        if policy == 'always':
-            return True
-        # sensitive_only：敏感任务关倍率(关)时必须立刻重启保证生效；
-        # 开倍率不赶时间 —— 停游戏写文件即可，让 ALAS 下次自己启动，
-        # 这样不会为了"开倍率"多出一次重启。
-        if sensitive and not mode:
-            return True
-        return False
-
-    @property
-    def restart_policy(self):
-        return str(deep_get(self.config.data, 'ModHandler.ModHandler.RestartTask',
-                            default='always') or 'always')
-
     def set_multiplier(self, mode: bool, restart=None):
         """
         按配置的后端切换倍率。
+        overlay 后端（默认）直接点悬浮窗开关，native 改内存立即生效，不重启游戏；
+        restart 参数仅为 prefs 后端保留。
 
         Args:
             mode: True = 开倍率，False = 关倍率
-            restart: 仅 prefs 后端有意义。
-                     None -> 按 RestartTask 策略；True/False -> 强制
+            restart: 仅 prefs 后端有意义
         Returns:
             bool: 后端是否真的做了改动（没配 key、或已是目标状态时为 False）
         """
@@ -544,8 +502,7 @@ class ModHandler(ModuleBase):
         # 倍率已关但以德服人还开着）。这时只补写缺的那几个键，
         # 不要把全部键重写一遍 —— 否则每个任务边界都要重启一次游戏。
         if not force:
-            repaired = self.repair_partial(
-                want_on, restart=self._restart_for(want_on, sensitive=task in disabled))
+            repaired = self.repair_partial(want_on)
             if repaired:
                 self._last_want = want_on
                 self.set_state(want_on)
@@ -568,22 +525,19 @@ class ModHandler(ModuleBase):
 
         logger.hr('ModHandler', level=1)
 
-        # 敏感任务 = 必须关闭倍率的任务。AlasGG 的 GGHandler 在这里会 gg_reset()，
-        # 也就是关掉 GG 并重启游戏，保证"关"一定生效。
-        # 重启与否统一由 _restart_for 按 ModHandler.RestartTask 决定。
+        # 敏感任务 = 必须关闭倍率的任务（META / 演习 / 共斗）。
+        # overlay 后端：调起悬浮窗点击开关，native 改内存立即生效，不重启游戏。
         sensitive = task in disabled
-        restart = self._restart_for(want_on, sensitive=sensitive)
 
         if sensitive:
-            logger.warning(f'敏感任务 `{task}`：'
-                           f'{"关闭倍率并重启游戏以确保生效" if restart else "关闭倍率"}')
+            logger.warning(f'敏感任务 `{task}`：关闭倍率（悬浮窗点击，立即生效）')
         else:
             logger.info(f'Task `{task}` -> multiplier should be '
                         f'{"ON" if want_on else "OFF"} '
                         f'(current: {"unknown" if current is None else ("ON" if current else "OFF")}'
                         f'/{source})')
 
-        changed = self.set_multiplier(want_on, restart=restart)
+        changed = self.set_multiplier(want_on)
         if not changed:
             logger.warning(f'ModHandler: 后端没有改动任何开关（task `{task}`，'
                            f'target {"ON" if want_on else "OFF"}）')
@@ -625,9 +579,7 @@ class ModHandler(ModuleBase):
         logger.hr('ModHandler', level=1)
         logger.warning(f'ModHandler: 悬浮窗倍率被外部改动（当前 {"ON" if current else "OFF"}，'
                        f'上次决定 {wanted}），按上次决定纠偏')
-        # 纠偏也走 RestartTask 策略（纠偏回「关」按 sensitive_only 语义视为敏感）
-        restart = self._restart_for(want_on, sensitive=not want_on)
-        changed = self.set_multiplier(want_on, restart=restart)
+        changed = self.set_multiplier(want_on)
         self.set_state(want_on)
         return changed
 

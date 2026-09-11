@@ -3250,13 +3250,6 @@
       "name": "Values when turning ON",
       "help": "Key/value pairs written when restoring the multiplier, such as 1=1000,2=1000,3=1000.\nUsed together with OffKeys."
     },
-    "RestartTask": {
-      "name": "When to restart the game",
-      "help": "The game must be stopped before rewriting its preferences: it keeps the switches in memory, so editing the file while it runs is not picked up and gets overwritten when the app exits. This option decides whether the game is started again right away.\n\nAlways restart (recommended): on a real state change, stop -> write -> restart and wait for login. It only restarts when the state actually changes.\n\nSensitive tasks only: restart right away when the multiplier is turned off for Exercise / META / Raid; for other tasks only write the file and let Alas run its own Restart task.\n\nNever restart: never touch the game process, only write the file.\nTHIS DOES NOT ACTUALLY CHANGE THE MULTIPLIER - the game will not re-read the config, the change only takes effect after a natural game restart and may be overwritten by the running game.",
-      "sensitive_only": "Sensitive tasks only (Alas starts it otherwise)",
-      "always": "Always restart (recommended)",
-      "never": "Never restart (writes only, multiplier unchanged)"
-    },
     "SensitiveTask": {
       "name": "Tasks that disable the multiplier",
       "help": "Sensitive modes = Raid / META / Exercise, where using a multiplier carries the highest ban risk.\nThe default \"dangerous tasks only\" is the recommended behaviour: META, Exercise and Raid off, everything else on.",
