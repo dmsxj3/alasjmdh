@@ -218,9 +218,33 @@ class ModOverlay(ModuleBase):
             return True, pos
         return False, None
 
+    def _wait_overlay_gone(self, tpls, timeout=None):
+        """
+        等悬浮窗按 -98 秒自杀（识图确认），屏幕干净后才返回。
+        悬浮窗从未出现时第一次检查即返回，不浪费时间。
+        Returns:
+            bool: True = 悬浮窗已消失
+        """
+        if timeout is None:
+            timeout = self.survival_seconds + 5
+        deadline = time.time() + timeout
+        while time.time() < deadline:
+            try:
+                if not self._overlay_visible(tpls, self.device.screenshot()):
+                    logger.attr('ModOverlay', 'overlay gone, screen clean')
+                    return True
+            except Exception:
+                pass
+            time.sleep(0.5)
+        logger.warning(f'ModOverlay: overlay still visible after {timeout}s (dies on its own)')
+        return False
+
     def set_multiplier(self, mode: bool, restart=None):
         """
         调起悬浮窗并点击"以德服人"开关，native 直改内存立即生效，零重启。
+        流程：调起悬浮窗 -> 点击修改 -> 自动等待悬浮窗自杀（最多 survival_seconds
+        秒，识图确认屏幕干净）-> 返回，进入 Alas 正常任务。
+        无论成功失败，返回前都会等待悬浮窗消失，不会把它留在屏幕上干扰后续识图。
         Args:
             mode: True = 开倍率, False = 关倍率
             restart: 兼容签名，overlay 后端不使用（天然零重启）
@@ -231,71 +255,61 @@ class ModOverlay(ModuleBase):
         if tpls is None:
             return False
 
-        self._write_survival()
-        if not self.show_overlay():
-            return False
-
-        # 等悬浮窗出现
-        deadline = time.time() + 10
-        img = None
-        while time.time() < deadline:
-            try:
-                img = self.device.screenshot()
-            except Exception as e:
-                logger.warning(f'ModOverlay: screenshot failed: {e}')
-                time.sleep(1)
-                continue
-            if self._overlay_visible(tpls, img):
-                break
-            time.sleep(0.5)
-        else:
-            logger.warning('ModOverlay: overlay did not appear in 10s')
-            return False
-
-        # 收起态则展开
-        if not tpls['OVERLAY_EXPANDED'].match(img):
-            pos = self._match_center(tpls['OVERLAY_COLLAPSED'], img)
-            if pos is None:
-                logger.warning('ModOverlay: overlay neither expanded nor collapsed matched')
-                return False
-            self.device.click(*pos)
-            time.sleep(1)
-            img = self.device.screenshot()
-            if not tpls['OVERLAY_EXPANDED'].match(img):
-                logger.warning('ModOverlay: failed to expand overlay')
+        try:
+            self._write_survival()
+            if not self.show_overlay():
                 return False
 
-        # 定位开关并判断
-        need_click, pos = self._switch_action(tpls, img, mode)
-        if pos is None:
-            logger.warning('ModOverlay: multiplier switch not found on overlay (templates outdated?)')
-            return False
-        if not need_click:
-            logger.attr('ModOverlay', f'multiplier already {"ON" if mode else "OFF"}')
-        else:
-            self.device.click(*pos)
-            logger.info(f'ModOverlay: clicked multiplier switch -> {"ON" if mode else "OFF"}')
-            time.sleep(1)
-            img = self.device.screenshot()
-            need_click2, _ = self._switch_action(tpls, img, mode)
-            if need_click2:
-                logger.warning('ModOverlay: switch state verify failed after click')
-                return False
-
-        # 清场：等悬浮窗按 -98 秒自杀，确保不干扰后续任务识图
-        timeout = self.survival_seconds + 5
-        deadline = time.time() + timeout
-        while time.time() < deadline:
-            try:
-                if not self._overlay_visible(tpls, self.device.screenshot()):
-                    logger.attr('ModOverlay', 'overlay gone, screen clean')
+            # 等悬浮窗出现
+            deadline = time.time() + 10
+            img = None
+            while time.time() < deadline:
+                try:
+                    img = self.device.screenshot()
+                except Exception as e:
+                    logger.warning(f'ModOverlay: screenshot failed: {e}')
+                    time.sleep(1)
+                    continue
+                if self._overlay_visible(tpls, img):
                     break
-            except Exception:
-                pass
-            time.sleep(0.5)
-        else:
-            logger.warning(f'ModOverlay: overlay still visible after {timeout}s (dies on its own)')
-        return True
+                time.sleep(0.5)
+            else:
+                logger.warning('ModOverlay: overlay did not appear in 10s')
+                return False
+
+            # 收起态则展开
+            if not tpls['OVERLAY_EXPANDED'].match(img):
+                pos = self._match_center(tpls['OVERLAY_COLLAPSED'], img)
+                if pos is None:
+                    logger.warning('ModOverlay: overlay neither expanded nor collapsed matched')
+                    return False
+                self.device.click(*pos)
+                time.sleep(1)
+                img = self.device.screenshot()
+                if not tpls['OVERLAY_EXPANDED'].match(img):
+                    logger.warning('ModOverlay: failed to expand overlay')
+                    return False
+
+            # 定位开关并判断
+            need_click, pos = self._switch_action(tpls, img, mode)
+            if pos is None:
+                logger.warning('ModOverlay: multiplier switch not found on overlay (templates outdated?)')
+                return False
+            if not need_click:
+                logger.attr('ModOverlay', f'multiplier already {"ON" if mode else "OFF"}')
+            else:
+                self.device.click(*pos)
+                logger.info(f'ModOverlay: clicked multiplier switch -> {"ON" if mode else "OFF"}')
+                time.sleep(1)
+                img = self.device.screenshot()
+                need_click2, _ = self._switch_action(tpls, img, mode)
+                if need_click2:
+                    logger.warning('ModOverlay: switch state verify failed after click')
+                    return False
+            return True
+        finally:
+            # 清场：无论成功失败，都等悬浮窗按 -98 秒自杀再返回任务
+            self._wait_overlay_gone(tpls)
 
     def repair(self, mode: bool, restart=None):
         """与 set_multiplier 相同（overlay 后端没有部分匹配概念，XML 状态即全量状态）。"""
