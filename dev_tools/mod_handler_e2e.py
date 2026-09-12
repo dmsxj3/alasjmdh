@@ -84,21 +84,9 @@ class SimulatedDevice(FakeDevice):
             return self._su(inner)
         return recorded
 
-    def _su(self, inner):
-        inner = inner.strip()
-        if not self.root:
-            return 'uid=1000(u0_a46) gid=1000(u0_a46)'
-        if inner == 'id':
-            return 'uid=0(root) gid=0(root)'
-        if inner.startswith('cat '):
-            return self.xml if self.xml is not None else ''
-        if inner.startswith('stat '):
-            return '10046 10046 660'
-        if inner.startswith('cp '):
-            # cp TMP PREF && chown ... && chmod ... && restorecon ... ; rm -f TMP
-            self.xml = self.pushed[TMP_REMOTE]
-            return ''
-        return ''
+    # _su 直接用 testkit 里那套「段内 && 串联、段间 ; 分隔」的最小 shell 模拟：
+    # ModPrefs.write_raw 现在靠命令链末尾的 echo 标记判定成功，自己再实现一份
+    # 很容易漏掉标记，把成功的写入误判成失败。
 
     def adb_push(self, local, remote):
         super().adb_push(local, remote)
@@ -248,15 +236,19 @@ check('无 key 时设备倍率保持原样', dev.multiplier_on is True)
 check('无 key 时 keys_configured=False', h.keys_configured is False)
 
 # ---------------------------------------------------------------- 7
-checker.header('7. 非 root 时不破坏设备状态')
+checker.header('7. 非 root 时后端不可用：如实上报、不破坏设备状态')
 h, cfg, dev = build('e2e_noroot')
 dev.root = False
 dev.calls.clear()
+# 后端抛的 RuntimeError 现在被 ModHandler.set_multiplier 降级成「本次没改动」，
+# 于是「该关倍率时后端不可用」会落到关失败判定里，而不是被 alas.py 的宽
+# except 记一条 warning 就继续跑任务。
 try:
-    h.check_then_set('exercise')
-    check('非 root 时异常被 check_then_set 抛出', False, '没有抛异常')
-except RuntimeError as e:
-    check('非 root 时抛出可读错误', 'root' in str(e), str(e))
+    changed = h.check_then_set('exercise')
+    check('非 root 时如实返回「没改动」且不停机', changed is False, f'changed={changed}')
+except mh.RequestHumanTakeover:
+    check('非 root 时如实返回「没改动」且不停机', False,
+          '读不到设备状态（None）时不该武断停机')
 check('非 root 时设备 XML 未被改动', dev.multiplier_on is True)
 eq('非 root 时未停游戏', [c for c in dev.calls if c.startswith('app_')], [])
 

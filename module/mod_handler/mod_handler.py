@@ -446,43 +446,50 @@ class ModHandler(ModuleBase):
         Returns:
             bool: 后端是否确认达成目标状态（没配 key、或回读校验未通过时为 False）
         """
-        result = self._backend.set_multiplier(mode)
+        try:
+            result = self._backend.set_multiplier(mode)
+        except RequestHumanTakeover:
+            # 后端主动要求停机（例如 prefs 发现 Error.HandleError 关闭后无法停游戏）：
+            # 必须放行，不能被下面的 except Exception 降级成「本次没改动」。
+            raise
+        except Exception as e:
+            # 后端抛异常 = 本次切换根本没做到。以前让它冒泡到调度循环，被
+            # alas.py 的宽 except 记一条 warning 就继续跑任务了 —— 于是「该关
+            # 倍率时后端崩了」会带着倍率一路跑下去。现在统一降级成 False，
+            # 由调用方走「关失败」的判定（含停机），异常栈记在这里便于定位。
+            logger.exception(f'ModHandler: 后端切换倍率异常: {type(e).__name__}: {e}')
+            return False
         if result:
             logger.attr('ModHandler', f'multiplier {"ON" if mode else "OFF"}')
         return bool(result)
 
-    def _is_sensitive_task(self, task):
+    def _stop_if_still_on(self, task):
         """
-        该任务是否属于策略里的「真敏感任务」（演习 / META / 共斗）。
+        该关倍率时没关掉，且回读确认设备上倍率仍开着 —— 停止本实例交人工。
 
-        注意不能直接用 `task in disabled`：resolve_policy 的关闭列表里还混着
-        GROUP_ALWAYS_OFF（minigame，只是「倍率无意义且会干扰」，不是封号风险）。
-        停机升级只对真敏感任务生效，否则小游戏关不掉倍率也会把整个实例停掉。
-        """
-        return task in sensitive_tasks(self.sensitive_option)
+        用户语义：**不区分任务类型**。该关而没关掉本身就说明链路出了问题
+        （后端坏了、坐标漂移了、key 映射错了），带着「以为关了其实没关」的
+        状态继续跑就是封号风险，所以只要确认还开着就直接停。
 
-    def _critical_shutdown(self, task):
+        为什么还要「回读确认仍开着」这一条：后端返回 False 也可能只是
+        「压根没能操作」（游戏没在跑、没配 OffKeys、overlay 被崩溃保护停用），
+        这时设备上未必真开着，盲目停机只会把本可自愈的情况也打断。
+        只有设备确实还开着才等于封号风险。
+
+        Returns:
+            bool: 回读确认倍率仍开着时抛 RequestHumanTakeover（不返回）；
+                  否则返回 False，调用方继续按「本次没改动」处理。
         """
-        敏感任务关倍率失败、且设备确认倍率仍开着 —— 带着倍率进敏感任务
-        等同封号风险。推送通知后抛 RequestHumanTakeover 停止本实例，
-        交人工处理；绝不能带着「以为关了其实没关」的状态继续跑任务。
-        """
+        if self.read_backend_state() is not True:
+            return False
         logger.hr('ModHandler', level=1)
         logger.critical(
-            f'ModHandler: 敏感任务 `{task}` 关倍率失败，设备上倍率仍开着 —— '
-            f'带倍率进敏感任务等同封号风险，停止 Alas 交人工处理')
-        try:
-            # 延迟导入：notify -> onepush，个别测试环境可能没有
-            from module.notify import handle_notify
-            handle_notify(
-                getattr(self.config, 'Error_OnePushConfig', '') or '',
-                title=f'Alas <{getattr(self.config, "config_name", "alas")}> 倍率控制失败',
-                content=f'敏感任务 `{task}` 关倍率失败，倍率仍开启，已停止调度',
-            )
-        except Exception as e:
-            logger.warning(f'ModHandler: notify failed: {e}')
+            f'ModHandler: 任务 `{task}` 需要关闭倍率，但关闭失败且设备回读确认倍率仍开着 —— '
+            f'继续跑下去就是封号风险，停止 Alas 交人工处理')
+        # 通知与退出交给 alas.py 的调度循环统一收尾（那里才有 config_name，
+        # 也与「任务连续失败 3 次」等其它致命路径走同一套处理）。
         raise RequestHumanTakeover(
-            f'ModHandler: sensitive task `{task}` failed to turn multiplier off')
+            f'ModHandler: failed to turn multiplier off for task `{task}`')
 
     # ------------------------------------------------------------ 主逻辑
     def check_then_set(self, task, force=False):
@@ -510,11 +517,10 @@ class ModHandler(ModuleBase):
             # 只要我们能读到设备状态且它正开着，就仍然关掉。
             if want_on is False and self.read_backend_state() is True:
                 logger.hr('ModHandler', level=1)
-                logger.warning('ModHandler 已关闭，但检测到敏感任务里倍率仍开着，强制关闭')
+                logger.warning('ModHandler 已关闭，但检测到该关倍率的任务里倍率仍开着，强制关闭')
                 changed = self.set_multiplier(False)
-                if not changed and self._is_sensitive_task(task) \
-                        and self.read_backend_state() is True:
-                    self._critical_shutdown(task)
+                if not changed:
+                    self._stop_if_still_on(task)
                 self.set_state(False)
                 return changed
             return False
@@ -581,12 +587,10 @@ class ModHandler(ModuleBase):
         changed = self.set_multiplier(want_on)
         if not changed:
             # 后端返回 False 只剩「尝试过但没达成」（幂等已由后端返回 True 表达）。
-            # 敏感任务没关掉且设备确认倍率仍开着 = 封号风险，直接停机推送。
-            # 只对真敏感任务升级：minigame 与未列出任务（want_on 来自缓存）
-            # 关失败不值得停掉整个实例，交给下一个敏感任务再兜。
-            if want_on is False and self._is_sensitive_task(task) \
-                    and self.read_backend_state() is True:
-                self._critical_shutdown(task)
+            if want_on is False:
+                # 该关而没关掉 = 链路出了问题（后端异常、坐标漂移、key 映射错）。
+                # 不区分任务类型：确认设备上还开着就停机交人工。
+                self._stop_if_still_on(task)
             logger.warning(f'ModHandler: 后端没有改动任何开关（task `{task}`，'
                            f'target {"ON" if want_on else "OFF"}）')
         self._last_want = want_on

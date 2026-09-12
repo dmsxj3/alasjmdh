@@ -498,42 +498,85 @@ h.read_backend_state = lambda: False
 changed = h.check_then_set('main')
 check('常规任务开失败不停机、返回 False', changed is False)
 
-# 4.15c 停机只针对「真敏感任务」。
-# 防回归：GROUP_ALWAYS_OFF 的 minigame（只是「倍率无意义」，不是封号风险）
-# 和未列出任务（want_on 来自缓存）关失败时，绝不能把整个实例停掉。
-check('minigame 不在真敏感任务集合里', 'minigame' not in mh.sensitive_tasks())
-check('_is_sensitive_task: exercise 为真', new_handler()[0]._is_sensitive_task('exercise'))
-check('_is_sensitive_task: minigame 为假', not new_handler()[0]._is_sensitive_task('minigame'))
-
-for _task, _label in (('minigame', '小游戏'), ('commission', '未列出任务')):
+# 4.15c 用户语义：不区分任务类型。
+# 只要「该关倍率时没关掉」且回读确认设备上倍率仍开着，就停机 ——
+# 该关而没关本身就说明链路出了问题（后端坏了、坐标漂移、key 映射错），
+# 带着「以为关了其实没关」的状态继续跑就是封号风险。
+# 所以 minigame（GROUP_ALWAYS_OFF，策略同样要求关）与未列出任务
+# （沿用上次决定 = 关）同样在列，不再按「敏感 / 非敏感」区分。
+for _task, _label in (('exercise', '演习'), ('coalition', '共斗'),
+                      ('minigame', '小游戏'), ('commission', '未列出任务')):
     h, cfg, dev = new_handler()
     h.set_state(False)                     # 缓存：上次决定是关
     h.set_multiplier = lambda mode: False
     h.read_backend_state = lambda: True    # 设备上倍率确实还开着
     try:
-        changed = h.check_then_set(_task)
-        check(f'{_label}({_task}) 关失败不停机、返回 False', changed is False)
-    except mh.RequestHumanTakeover:
-        check(f'{_label}({_task}) 关失败不停机、返回 False', False, '被误判成敏感任务停机')
+        h.check_then_set(_task)
+        check(f'{_label}({_task}) 该关没关掉时停机', False, '没有抛异常')
+    except mh.RequestHumanTakeover as e:
+        check(f'{_label}({_task}) 该关没关掉时停机', _task in str(e), str(e))
 
-# 4.15d Enabled=False 的强制关闭分支同样只对真敏感任务停机
-h, cfg, dev = new_handler(Enabled=False)
-h.set_multiplier = lambda mode: False
+# 回读确认不了时（游戏没跑 / overlay 被崩溃保护停用）不武断停机：
+# 后端返回 False 也可能只是「压根没能操作」，设备上未必真开着。
+for _state, _label in ((None, '读不到状态'), (False, '确认已关')):
+    h, cfg, dev = new_handler()
+    h.set_state(False)
+    h.set_multiplier = lambda mode: False
+    h.read_backend_state = lambda s=_state: s
+    try:
+        changed = h.check_then_set('exercise')
+        check(f'回读{_label}时不停机、返回 False', changed is False)
+    except mh.RequestHumanTakeover:
+        check(f'回读{_label}时不停机、返回 False', False, '不该停机')
+
+# 4.15d Enabled=False 的强制关闭分支同样按「该关就停」处理
+for _task in ('exercise', 'minigame'):
+    h, cfg, dev = new_handler(Enabled=False)
+    h.set_multiplier = lambda mode: False
+    h.read_backend_state = lambda: True
+    try:
+        h.check_then_set(_task)
+        check(f'Enabled=False 下 {_task} 关失败时停机', False, '没有抛异常')
+    except mh.RequestHumanTakeover:
+        check(f'Enabled=False 下 {_task} 关失败时停机', True)
+
+
+# 4.15e 后端抛异常必须落到「关失败」判定上。
+# 以前异常直接冒泡到 alas.py 的宽 except，只记一条 warning 就继续跑任务 ——
+# 于是「该关倍率时后端崩了」会带着倍率一路跑下去。
+class _BoomBackend:
+    def set_multiplier(self, mode):
+        raise RuntimeError('overlay exploded')
+
+
+h, cfg, dev = new_handler()
+h._backend_obj = _BoomBackend()
+del h.set_multiplier                    # 恢复真实的 ModHandler.set_multiplier
 h.read_backend_state = lambda: True
 try:
     h.check_then_set('exercise')
-    check('Enabled=False 强制关失败时抛 RequestHumanTakeover', False, '没有抛异常')
+    check('后端抛异常时同样停机', False, '没有抛异常')
 except mh.RequestHumanTakeover:
-    check('Enabled=False 强制关失败时抛 RequestHumanTakeover', True)
+    check('后端抛异常时同样停机', True)
 
-h, cfg, dev = new_handler(Enabled=False)
-h.set_multiplier = lambda mode: False
-h.read_backend_state = lambda: True
+
+# 4.15f 后端主动抛 RequestHumanTakeover 时必须原样放行，
+# 不能被 set_multiplier 的 except Exception 降级成「本次没改动」
+class _TakeoverBackend:
+    def set_multiplier(self, mode):
+        raise mh.RequestHumanTakeover('backend wants human')
+
+
+h, cfg, dev = new_handler()
+h._backend_obj = _TakeoverBackend()
+del h.set_multiplier
+h.read_backend_state = lambda: None
 try:
-    h.check_then_set('minigame')
-    check('Enabled=False 下 minigame 关失败也不停机', True)
-except mh.RequestHumanTakeover:
-    check('Enabled=False 下 minigame 关失败也不停机', False, '被误判成敏感任务停机')
+    h.check_then_set('main')
+    check('后端抛 RequestHumanTakeover 时原样放行', False, '没有抛异常')
+except mh.RequestHumanTakeover as e:
+    check('后端抛 RequestHumanTakeover 时原样放行',
+          'backend wants human' in str(e), str(e))
 
 # 4.16 显式传入 device 时必须保留它（曾经被无条件覆盖成 None，
 #      导致所有 adb 操作都对 None 设备执行）
@@ -575,8 +618,18 @@ check('钩子在 Start task 之前',
       alas_src.index('check_then_set') < alas_src.index('Scheduler: Start task'))
 check('钩子被 try/except 包住，失败不拖垮调度',
       'failed to apply multiplier policy' in alas_src)
-check('钩子放行 RequestHumanTakeover（敏感关失败必须停机，不能被 except 吞掉）',
+check('钩子放行 RequestHumanTakeover（该关倍率时关失败必须停机，不能被宽 except 吞掉）',
       'except RequestHumanTakeover' in alas_src)
+# RequestHumanTakeover 从 loop() 冒出去只会被 process_manager 的
+# `except Exception` 记一条 logger.exception，用户收不到任何消息、GUI 也只会
+# 显示「跑完了」。所以停机必须在钩子里自己推送 + exit(1)。
+_hook_src = alas_src.split('mod.check_then_set', 1)[-1].split('# Run', 1)[0]
+check('停机前推送通知（Error_OnePushConfig）',
+      'handle_notify' in _hook_src and 'Error_OnePushConfig' in _hook_src)
+check('停机走 exit(1)，与「任务连续失败 3 次」同样的收尾',
+      'exit(1)' in _hook_src)
+check('RequestHumanTakeover 分支排在宽 except Exception 之前',
+      _hook_src.index('except RequestHumanTakeover') < _hook_src.index('except Exception'))
 
 # 防回归：webui app.py 的结构。曾经因为编辑失误把 set_group 的
 # @use_scope("groups") 装饰器吃掉、同时丢掉 refresh_mod_handler_state 调用，

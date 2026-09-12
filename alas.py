@@ -592,9 +592,20 @@ class AzurLaneAutoScript:
                     mod.check_on_startup()
                     startup_checked = True
                 mod.check_then_set(inflection.underscore(task))
-            except RequestHumanTakeover:
-                # 敏感任务关倍率失败等致命情况：停止本实例，交人工处理
-                raise
+            except RequestHumanTakeover as e:
+                # 该关倍率时没关掉（后端异常，或回读确认设备上倍率仍开着）
+                # = 封号风险，不再继续调度。收尾方式与上面「任务连续失败 3 次」
+                # 一致：推送一条通知再 exit，让 GUI 侧能看到实例是「崩了」而不是
+                # 「跑完了」。绝不能带着「以为关了其实没关」的状态继续跑任务。
+                logger.critical('ModHandler: Request human takeover')
+                logger.critical(e)
+                handle_notify(
+                    self.config.Error_OnePushConfig,
+                    title=f"Alas <{self.config_name}> crashed",
+                    content=f"<{self.config_name}> 倍率控制失败，已停止调度\n"
+                            f"Task `{task}`: {e}",
+                )
+                exit(1)
             except Exception as e:
                 # 控制失败不应该拖垮整个调度，记录后继续跑任务
                 logger.warning(f'ModHandler: failed to apply multiplier policy: {e}')
