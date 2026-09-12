@@ -594,8 +594,21 @@ class ModHandler(ModuleBase):
         current, source = self.current_state()
         if current is not None and current == want_on and not force:
             self._last_want = want_on
-            logger.attr('ModHandler', f'{task}: multiplier already {"ON" if want_on else "OFF"}')
-            return False
+            if task in disabled and source != 'device':
+                # ★ 敏感任务的 already 判定必须以设备实时读数为准（2026-09-12 现场教训）。
+                # 用户手动把倍率拨到自定义档位（既不在 OffKeys 也不在 OnKeys 上）时，
+                # 设备读数只能是 None，current_state() 会退回本地缓存 —— 旧逻辑拿着
+                # 缓存的 OFF 直接放行，敏感任务带着倍率开打。这里不认缓存短路，
+                # 强制走一次写入流程，让后端以设备真实通道重新确认/写入；
+                # 若写入也失败且回读仍是 None，由失败分支的停机规则（raise）收尾。
+                # 常规任务维持缓存幂等：倍率开着对它们是正常态，不必每次都碰设备。
+                logger.warning(
+                    f'ModHandler: `{task}` 需要倍率 OFF，但设备真实状态读不到'
+                    f'（缓存显示 OFF，可能是手动改过倍率或读取断开）—— '
+                    f'不信任缓存，重新执行一次关闭')
+            else:
+                logger.attr('ModHandler', f'{task}: multiplier already {"ON" if want_on else "OFF"}')
+                return False
 
         # 设备可能停在"部分匹配"的中间状态（用户手动拨过某个开关，例如
         # 倍率已关但以德服人还开着）。这时只补写缺的那几个键，

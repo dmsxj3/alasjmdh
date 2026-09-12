@@ -328,22 +328,25 @@ def new_handler(**config_values):
 
 
 # 4.1 敏感任务关闭、常规任务启用；状态已一致时不重复动作（这才是真实的调度序列）
+# ★ 2026-09-12 语义更新：敏感任务的 already 判定必须以设备实时读数为准 ——
+#   测试桩读不到设备（None），于是每个敏感任务边界都会重新写入一次（fail-closed）；
+#   常规任务维持缓存幂等。
 SEQUENCE = [
     # (任务, 期望倍率, 是否应该产生一次动作)
     ('main', True, True),
-    ('event_a', True, False),        # 已经是开
+    ('event_a', True, False),        # 已经是开（常规任务，缓存幂等）
     ('hard', True, False),
     ('daily', True, False),
     ('opsi_explore', True, False),
     ('guild', True, False),          # 默认策略下大舰队正常启用
     ('exercise', False, True),       # 演习 -> 关
     ('main2', True, True),           # 回到主线 -> 开
-    ('opsi_ash_beacon', False, True),    # META 信标 -> 关
-    ('opsi_ash_assist', False, False),
-    ('raid', False, False),          # 共斗 -> 关（已经是关）
-    ('raid_daily', False, False),
-    ('coalition', False, False),
-    ('coalition_sp', False, False),
+    ('opsi_ash_beacon', False, True),    # META 信标 -> 关（设备读不到，重写确认）
+    ('opsi_ash_assist', False, True),    # 同上，敏感任务不做缓存幂等
+    ('raid', False, True),           # 共斗 -> 关（重写确认）
+    ('raid_daily', False, True),
+    ('coalition', False, True),
+    ('coalition_sp', False, True),
     ('war_archives', True, True),    # 回到常规 -> 开
     ('gems_farming', True, False),
 ]
@@ -359,14 +362,15 @@ for task, want, should_apply in SEQUENCE:
           and (not should_apply or h._applied[-1] is want),
           f'changed={changed} delta={delta} applied={h._applied}')
 
-# 4.2 幂等：同一个任务连续三次只动作一次
+# 4.2 敏感任务的「幂等」只在设备实时读数下成立：设备读不到时，
+# 每个敏感任务边界都重新写入一次（不能凭缓存跳过 —— 缓存可能已过时）
 h, cfg, dev = new_handler()
 first = h.check_then_set('exercise')
 second = h.check_then_set('exercise')
 third = h.check_then_set('exercise')
-check('连续三次 exercise 只在第一次动作',
-      first is True and second is False and third is False
-      and h._applied == [False], f'applied={h._applied}')
+check('连续三次 exercise：设备读不到时每次都重新确认写入',
+      first is True and second is True and third is True
+      and h._applied == [False, False, False], f'applied={h._applied}')
 
 # 4.2b 策略层只传 mode：重启游戏不再由本功能决定（写完游戏保持关闭，
 # ALAS 发现游戏没跑会自动排 Restart 任务）。fake 用严格单参签名，
@@ -576,6 +580,37 @@ for _task in ('exercise', 'minigame'):
         check(f'Enabled=False 下 {_task} 关失败时停机', False, '没有抛异常')
     except mh.RequestHumanTakeover:
         check(f'Enabled=False 下 {_task} 关失败时停机', True)
+
+
+# 4.15g ★（2026-09-12 现场教训）敏感任务的 already 判定必须以设备实时读数为准。
+# 现场：用户手动把倍率拨到自定义档位后，设备读数是 None（不在任一目标档），
+# current_state() 退回本地缓存 —— 旧逻辑拿着缓存的 OFF 直接放行，
+# 敏感任务带着倍率开打（既没停机也没推送）。
+# 场景 A：缓存说 OFF + 设备读不到 + 后端也写不成 -> 不得放行，停机推送。
+h, cfg, dev = new_handler()
+h.set_state(False)                       # 缓存：上次决定是关
+h.set_multiplier = lambda mode: False    # 后端写不成
+h.read_backend_state = lambda: None      # 设备读不到（手动档位 / 读取断开）
+try:
+    h.check_then_set('exercise')
+    check('缓存说 OFF 但设备读不到且写不成 -> 停机推送', False, '没有抛异常')
+except mh.RequestHumanTakeover:
+    check('缓存说 OFF 但设备读不到且写不成 -> 停机推送', True)
+
+# 场景 B：缓存说 OFF + 设备读不到 + 后端能写成（如 prefs 直写）-> 重新执行一次关闭
+h, cfg, dev = new_handler()
+h.set_state(False)
+h.read_backend_state = lambda: None
+changed = h.check_then_set('exercise')
+check('缓存说 OFF 但设备读不到 -> 不凭缓存放行，重新执行关闭',
+      changed is True and h._applied == [False], f'changed={changed} applied={h._applied}')
+
+# 场景 C：设备实时读数确认已关 -> 正常幂等放行（这才是可信的 already）
+h, cfg, dev = new_handler()
+h.set_state(False)
+h.read_backend_state = lambda: False     # 设备真实读数：已关
+changed = h.check_then_set('exercise')
+check('设备实时读数确认已关 -> 幂等放行', changed is False and h._applied == [])
 
 
 # 4.14b ★ keys_configured 必须按后端区分（三个后端用的配置项完全不同）。
