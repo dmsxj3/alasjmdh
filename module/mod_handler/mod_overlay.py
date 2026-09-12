@@ -542,28 +542,50 @@ class ModOverlay(ModuleBase):
             out_stop = str(self.device.adb_shell(f'su -c "am stopservice -n {target}"') or '')
         except Exception as e:
             logger.warning(f'ModOverlay: su stopservice 异常: {e}')
-        if 'Stopping service' not in out_stop:
-            # 失败命令不抛异常（N-1/N-4），不在这里喊一嗓子就无法区分
-            # 「stop 成功但 start 失败」和「两个都失败」。
-            logger.warning(f'ModOverlay: su stopservice 未能确认生效: {out_stop.strip()[:120]}')
+        # ★ 成败判据（第三轮审查 R-2，真机实测证实）：am stopservice 无论成败
+        # 都先打 "Stopping service:" 前缀，失败信号在后文 ——
+        #   "Error: ..."                   -> warning（真失败）
+        #   "Service not stopped: ..."     -> info（良性：目标本来就没在跑）
+        #   连前缀都没有（su 缺失，"sh: su: inaccessible..."）-> warning（未受理）
+        if 'Error' in out_stop:
+            logger.warning(f'ModOverlay: su stopservice 失败: {out_stop.strip()[:140]}')
+        elif 'Service not stopped' in out_stop:
+            logger.info('ModOverlay: stopservice 时 Service 本就不在运行（良性）')
+        elif 'Stopping service' not in out_stop:
+            logger.warning(f'ModOverlay: su stopservice 未能受理（疑似无 root）: '
+                           f'{out_stop.strip()[:120]}')
         time.sleep(1.0)
         out = ''
         try:
             out = str(self.device.adb_shell(f'su -c "am startservice -n {target}"') or '')
         except Exception as e:
             logger.warning(f'ModOverlay: su startservice 异常: {e}')
-        if 'Starting service' not in out:
-            # su 不可用（无 root / su 被拒）：退回普通 startservice 兜底。
+
+        def _start_ok(o):
+            # ★ 组合判据（第三轮审查 R-1，真机实测证实）：am 无论成败都先打
+            # "Starting service:" 前缀（AOSP 在调 AMS 之前 println），失败信息是
+            # 其后的 "Error: ..." 行（对不存在的包也如此）。所以：
+            #   - 只看前缀 = 永远判成功（7f28b3aea 的退化，兜底死代码）；
+            #   - 只看 "Error" = 漏掉 shell 级失败（su 缺失时两个标记都没有）。
+            # 两者结合：打了前缀 且 没有 Error 行才算受理成功；两个方向的误判
+            # 都是良性的（多一次廉价兜底/一条 warning，不会误放行）。
+            return ('Starting service' in o) and ('Error' not in o)
+
+        if not _start_ok(out):
+            # su 不可用（su 缺失/被拒）或 am 层失败：退回普通 startservice 兜底。
             try:
                 out = str(self.device.adb_shell(['am', 'startservice', '-n', target]) or '')
             except Exception as e:
                 logger.warning(f'ModOverlay: startservice failed: {e}')
-        if 'Starting service' not in out:
-            logger.warning(f'ModOverlay: startservice 未能确认成功: {out.strip()[:120]}')
+        if not _start_ok(out):
+            logger.warning(f'ModOverlay: startservice 未能确认成功: {out.strip()[:150]}')
 
         # 3) 等待面板出现；前 3 秒没出现时补一次 start —— 覆盖「stopservice 是
         #    异步的，0.5s 内没停完导致首次 start 对仍活着的 Service 变成 no-op」
         #    的时序窗口（第二轮审查 N-3）。
+        #    ★ 边界：补发定时点在调用起点 +3s，所以 **timeout ≤ 3 的调用不会
+        #    补发**（不等窗口弹出就直接超时返回，交 prefs 降级链路）—— 这是
+        #    有意的行为：短超时的调用方本来就不想等（第三轮审查 R-4）。
         deadline = time.time() + timeout
         rekick_at = time.time() + 3
         rekick_done = False

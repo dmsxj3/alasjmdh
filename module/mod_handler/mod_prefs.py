@@ -95,13 +95,13 @@ def _adb_su_static(cmd, serial=None, timeout=30):
     return result.stdout.decode('utf-8', 'replace')
 
 
-def _adb_devices_static():
+def _adb_devices_static(timeout=15):
     """在线设备 serial 列表。"""
     import subprocess
 
     try:
         result = subprocess.run([_find_adb_static(), 'devices'],
-                                capture_output=True, timeout=15)
+                                capture_output=True, timeout=timeout)
     except Exception:
         return []
     out = []
@@ -123,7 +123,7 @@ def _adb_connect_static(serial, timeout=5):
     """
     import subprocess
 
-    if not serial or serial in _adb_devices_static():
+    if not serial or serial in _adb_devices_static(timeout=min(timeout, 5)):
         return True
     try:
         result = subprocess.run([_find_adb_static(), 'connect', serial],
@@ -134,7 +134,7 @@ def _adb_connect_static(serial, timeout=5):
     msg = result.stdout.decode('utf-8', 'replace').strip()
     if msg:
         logger.info(f'ModPrefs: {msg}')
-    return serial in _adb_devices_static()
+    return serial in _adb_devices_static(timeout=min(timeout, 5))
 
 
 def _format_pref_value(value):
@@ -163,12 +163,14 @@ def _keys_detail(parsed, target):
     return '  '.join(parts)
 
 
-def _candidate_serials(config, serial=None):
+def _candidate_serials(config, serial=None, devices_timeout=15):
     """
     候选设备列表：显式 serial -> 配置里的 serial -> adb devices 里所有在线设备。
 
     为什么要逐个试：ALAS 的 Emulator_Serial 有时写成 'auto' 或用别名，
     而 adb 里可能同时挂着真机与模拟器（真机通常没 root）。
+    devices_timeout：内部 adb devices 的子进程超时（GUI 只读路径会传小值，
+    第三轮审查 R-3：这个调用本身也占预算，不能放任 15s）。
     """
     out = []
     if serial:
@@ -177,7 +179,7 @@ def _candidate_serials(config, serial=None):
     if cfg_serial and cfg_serial != 'auto':
         out.append(cfg_serial)
     seen = []
-    for item in out + _adb_devices_static():
+    for item in out + _adb_devices_static(timeout=devices_timeout):
         if item not in seen:
             seen.append(item)
     return seen
@@ -212,21 +214,26 @@ def describe_state_readonly(config, serial=None):
     remote = f'/data/data/{package}/shared_prefs/{prefs_file}.xml'
     raw = None
     tried = []
-    # 整体预算 8s（第二轮审查 N-2）：候选设备可能多达 4 个，每候选 30s+30s
-    # 的默认超时最坏 240s —— GUI 渲染线程等不起。给 connect/su 各 5s 小超时，
-    # 超出整体预算就放弃剩余候选（第一候选通常就是配置的 serial，够用）。
+    # 整体预算 8s（第二轮审查 N-2 / 第三轮 R-3 收紧）：候选设备可能多达 4 个，
+    # 逐个 connect+su 各 5s 最坏 40s。三条纪律：
+    #   1. 候选列表只算一次（_adb_devices_static 内部的 adb devices 本身耗时）；
+    #   2. adb devices / connect / su 全部传小超时；
+    #   3. 每个候选的超时按剩余预算逐次收紧，单候选最坏也吃不满预算。
     import time as _time
     deadline = _time.time() + 8
-    for candidate in _candidate_serials(data, serial):
+    candidates = _candidate_serials(data, serial, devices_timeout=3)
+    for candidate in candidates:
         tried.append(candidate)
-        if _time.time() > deadline:
+        remaining = deadline - _time.time()
+        if remaining <= 0:
             logger.warning(f'ModPrefs: 只读状态查询超出 8s 预算，剩余候选未尝试: '
-                           f'{[c for c in _candidate_serials(data, serial) if c not in tried]}')
+                           f'{[c for c in candidates if c not in tried]}')
             break
+        step_timeout = int(max(1, min(5, remaining)))
         # 掉线时先尝试重连一次，否则会静默读不到
-        _adb_connect_static(candidate, timeout=5)
+        _adb_connect_static(candidate, timeout=step_timeout)
         try:
-            out = _adb_su_static(f'cat {remote}', serial=candidate, timeout=5)
+            out = _adb_su_static(f'cat {remote}', serial=candidate, timeout=step_timeout)
         except Exception as e:
             logger.warning(f'ModPrefs: {candidate} 读取异常: {type(e).__name__}: {e}')
             continue

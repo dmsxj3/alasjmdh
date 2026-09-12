@@ -422,6 +422,18 @@ eq('su 不可用 + 普通启动被拒 -> show() False（交给降级）',
 plain = [c for c in dev16.calls if 'am startservice' in c and 'su -c' not in c]
 check('兜底普通 startservice 有尝试', len(plain) >= 1, str(plain))
 
+# 7b-4 ★ 真实两行输出（第三轮审查 R-1）：am startservice 无论成败都先打
+# 'Starting service:' 前缀，失败信息在后一行 —— 只认前缀的判据会永远判成功。
+# 组合判据（前缀 + 无 Error）下：带 Error 的两行串必须判失败。
+o18, cfg18, dev18 = make_overlay()
+dev18.su_fails = True
+dev18.startservice_error = ('Starting service: Intent { cmp=com.bilibili.azurlane/com.android.support.Launcher }\n'
+                            ' Error: Requires permission not exported from uid 10046')
+dev18.windows_dump = ''
+dev18.calls.clear()
+eq('真实两行输出（前缀 + Error）-> 组合判据判失败',
+   o18.show(timeout=0.5), False)
+
 # 7b-3 ★ N-3 时序：stopservice 是异步的，首次 start 对「还没停完的 Service」
 # 可能变成 no-op（输出成功但小球没放出来）。show() 会在 ~3s 时补发一次 start。
 o17, cfg17, dev17 = make_overlay()
