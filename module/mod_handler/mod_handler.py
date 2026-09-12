@@ -17,6 +17,15 @@ ModHandler — 改版客户端（JMBQ / azurlan）悬浮窗倍率控制。
     避免未知任务把敏感任务的关闭状态顶掉（例如共斗之后紧跟 daily）。
 
 敏感任务分组与 AlasGG 的 GGHandler.check_then_set_gg_status 保持一致，便于对照。
+
+★ 不移植 AlasGG 的 power_limit()（开战前 OCR 战力上限兜底）。
+  它的前提是 GG 修改器真的改了舰船属性，所以开战前 OCR 到的战力能反映「修改还开着」。
+  本项目的悬浮窗倍率「不改战力」：开着也是正常战力，OCR 永远读到正常值，
+  于是这道兜底永远不会触发 —— 那比没有兜底更糟，因为它会让人以为还有第二道保险。
+  所以兜底只落在「写入后回读」这一层，且每一层都已经有了：
+    * ModPrefs.verify_applied        —— 写完回读 XML，不一致即判失败
+    * ModOverlay 点击后的 _at_target —— 点完绕开缓存重读，复核不通过即判失败
+    * ModHandler.read_backend_state  —— 关失败时二次回读，确实还开着才停机
 """
 import json
 import os
