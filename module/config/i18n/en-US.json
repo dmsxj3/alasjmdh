@@ -3221,7 +3221,7 @@
     },
     "Backend": {
       "name": "Backend",
-      "help": "[overlay recommended, zero restart] Use root to restart the mod's spare Service so the overlay reappears, then drag the three multiplier sliders to the minimum and flip the \"yi de fu ren\" switch - the mod applies it in memory and persists it, no game restart needed.\\nDo NOT use the number-input dialog: tapping a multiplier number opens an \"Input number\" dialog whose OK button is BROKEN on the modded package - pressing it throws ClassCastException and kills the game (logcat: Menu.ME017 -> Menu.lambda$SeekBar$5 -> AlertController$ButtonHandler). This implementation only uses sliders and the switch.\\nprefs: edit the shared-prefs XML directly; needs the game stopped and a restart to apply.\\nui: click overlay widgets with uiautomator2 (usually impossible, the overlay is not in the a11y tree).",
+      "help": "[overlay recommended, zero restart] Use root to restart the mod's spare Service so the overlay reappears, then drag the three multiplier sliders to the minimum and flip the \"yi de fu ren\" switch - the mod applies it in memory and persists it, no game restart needed.\nDo NOT use the number-input dialog: tapping a multiplier number opens an \"Input number\" dialog whose OK button is BROKEN on the modded package - pressing it throws ClassCastException and kills the game (logcat: Menu.ME017 -> Menu.lambda$SeekBar$5 -> AlertController$ButtonHandler). This implementation only uses sliders and the switch.\nprefs: edit the shared-prefs XML directly; needs the game stopped and a restart to apply.\nui: click overlay widgets with uiautomator2 (usually impossible, the overlay is not in the a11y tree).",
       "overlay": "Drive the overlay (zero restart, recommended)",
       "prefs": "Edit shared prefs (restart required)",
       "ui": "Click overlay widgets (no root, mostly unusable)"
@@ -3277,19 +3277,19 @@
     },
     "OverlayService": {
       "name": "Overlay summon service",
-      "help": "A spare Service registered by the mod that is normally never used. With root, stopservice + startservice makes the overlay reappear.\\nIt must be stop-then-start: while the Service is alive, startservice only triggers onStartCommand.\\nOnly summoned when the game process is already running: if it is not, startservice spawns a fresh process where Launcher.onCreate -> new Menu -> Menu.Icon() throws UnsatisfiedLinkError and crashes the game.\\nDefault com.android.support.Launcher (verified on JMBQ 3.4.0)."
+      "help": "A spare Service registered by the mod that is normally never used. With root, stopservice + startservice makes the overlay reappear.\nIt must be stop-then-start: while the Service is alive, startservice only triggers onStartCommand.\nOnly summoned when the game process is already running: if it is not, startservice spawns a fresh process where Launcher.onCreate -> new Menu -> Menu.Icon() throws UnsatisfiedLinkError and crashes the game.\nDefault com.android.support.Launcher (verified on JMBQ 3.4.0)."
     },
     "OverlaySurvivalSeconds": {
       "name": "Overlay survival seconds (fallback)",
-      "help": "Maps to the mod's internal prefs key -98 (settable in the mod panel).\\nAlas prefers the real -98 read from the device; this value is only used when it is unreadable.\\nThe panel timer restarts on every touch, so it will not vanish mid-operation; afterwards Alas waits for it to kill itself so it cannot occlude screenshot recognition. Default 20."
+      "help": "Maps to the mod's internal prefs key -98 (settable in the mod panel).\nAlas prefers the real -98 read from the device; this value is only used when it is unreadable.\nThe panel timer restarts on every touch, so it will not vanish mid-operation; afterwards Alas waits for it to kill itself so it cannot occlude screenshot recognition. Default 20."
     },
     "OverlayVisualVerify": {
       "name": "Screenshot verification",
-      "help": "On (default): besides the authoritative XML check, take a screenshot as a second opinion - locate the slider thumbs to derive the three multipliers, and sample the switch colours.\\nThis is informational only: unreadable results never count as a failure; XML stays authoritative."
+      "help": "On (default): besides the authoritative XML check, take a screenshot as a second opinion - locate the slider thumbs to derive the three multipliers, and sample the switch colours.\nThis is informational only: unreadable results never count as a failure; XML stays authoritative."
     },
     "OverlayFallbackPrefs": {
       "name": "Fallback to prefs on failure",
-      "help": "Off (default): when the overlay path cannot be confirmed, only a CRITICAL log is written and the game is never restarted.\\nTurn it on for a safety net: fall back to editing the shared-prefs XML (needs a restart) so a sensitive task never runs with the multiplier on. Enable at your own discretion."
+      "help": "Off (default): when the overlay path cannot be confirmed, only a CRITICAL log is written and the game is never restarted.\nTurn it on for a safety net: fall back to editing the shared-prefs XML (needs a restart) so a sensitive task never runs with the multiplier on. Enable at your own discretion."
     }
   },
   "Storage": {

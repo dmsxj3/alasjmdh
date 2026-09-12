@@ -283,6 +283,15 @@ ModOverlay._disabled = False
 # ---------------------------------------------------------------- 7. set_multiplier 主路径
 checker.header('7. set_multiplier 主路径与降级')
 
+# fallback_enabled 的缺省值必须与四处配置源一致（config_generated.py / args.json /
+# argument.yaml / template.json 都是 false）。以前写成 default=True，配置里缺这个键
+# 时会静默变成「允许为了关倍率重启游戏」，与文档和用户偏好相反。
+# FakeConfig 默认就不带 OverlayFallbackPrefs，所以下面第一个用例走的就是「缺键」。
+check('OverlayFallbackPrefs 缺省 -> 按默认关处理（与配置源一致）',
+      make_overlay()[0].fallback_enabled is False)
+check('OverlayFallbackPrefs=True 时才允许降级',
+      make_overlay(OverlayFallbackPrefs=True)[0].fallback_enabled is True)
+
 
 class StubPrefs:
     """记录调用的假 ModPrefs，用来验证降级链路。"""
@@ -302,12 +311,20 @@ dev7.calls.clear()
 eq('已是目标状态 -> True（不动作）', o7.set_multiplier(False), True)
 eq('已是目标状态时不碰设备', [c for c in dev7.calls if 'startservice' in c], [])
 
-o8, cfg8, dev8 = make_overlay()
+o8, cfg8, dev8 = make_overlay(OverlayFallbackPrefs=True)   # 必须显式开启：默认是关的
 set_device_xml(o8, xml_of(**{'1': 1000, '2': 1000, '3': 1000}))
 o8._prefs = StubPrefs(result=True)
 o8._disabled = True                                # 强制走降级分支
 eq('停用 + 开启降级 -> 走 prefs 并返回其结果', o8.set_multiplier(False), True)
 eq('降级时把 mode 透传给 ModPrefs', o8._prefs.calls, [False])
+
+# 反例：停用 + 没开降级 -> 如实返回 False，绝不偷偷写 prefs
+o8b, cfg8b, dev8b = make_overlay()                 # OverlayFallbackPrefs 缺省 = 关
+set_device_xml(o8b, xml_of(**{'1': 1000, '2': 1000, '3': 1000}))
+o8b._prefs = StubPrefs(result=True)
+o8b._disabled = True
+eq('停用 + 未开降级 -> 返回 False', o8b.set_multiplier(False), False)
+eq('未开降级时不碰 prefs', o8b._prefs.calls, [])
 
 # 真实降级链路（不替换 prefs_reader）：停用 overlay + 开启降级 -> 真写 prefs
 o9, cfg9, dev9 = make_overlay(OverlayFallbackPrefs=True)

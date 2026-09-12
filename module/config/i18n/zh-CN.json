@@ -3221,7 +3221,7 @@
     },
     "Backend": {
       "name": "控制方式",
-      "help": "【推荐 overlay，零重启】用 root 调起 mod 的备用 Service 让悬浮窗重新出现，然后把三个倍率滑块拖到最小、点掉「以德服人」开关 —— mod 会即时改内存并落盘，游戏不用重启。\\n★ 不要用悬浮窗里的数字输入框：点倍率后面的数字会弹出 Input number 对话框，而它的 OK 按钮在改版包上是坏的 —— 按下会抛 ClassCastException 直接崩游戏（实测 logcat：Menu.ME017 -> Menu.lambda$SeekBar$5 -> AlertController$ButtonHandler）。本实现全程只用滑块和开关。\\nprefs：直接改共享配置 XML，需要停游戏、且要重启游戏才生效；换 mod 版本/换服时更通用。\\nui：用 uiautomator2 点悬浮窗控件（悬浮窗本体不在辅助功能树里，基本不可用，仅留档）。",
+      "help": "【推荐 overlay，零重启】用 root 调起 mod 的备用 Service 让悬浮窗重新出现，然后把三个倍率滑块拖到最小、点掉「以德服人」开关 —— mod 会即时改内存并落盘，游戏不用重启。\n★ 不要用悬浮窗里的数字输入框：点倍率后面的数字会弹出 Input number 对话框，而它的 OK 按钮在改版包上是坏的 —— 按下会抛 ClassCastException 直接崩游戏（实测 logcat：Menu.ME017 -> Menu.lambda$SeekBar$5 -> AlertController$ButtonHandler）。本实现全程只用滑块和开关。\nprefs：直接改共享配置 XML，需要停游戏、且要重启游戏才生效；换 mod 版本/换服时更通用。\nui：用 uiautomator2 点悬浮窗控件（悬浮窗本体不在辅助功能树里，基本不可用，仅留档）。",
       "overlay": "调悬浮窗拖滑块/点开关（零重启，推荐）",
       "prefs": "改共享配置（需重启生效）",
       "ui": "点悬浮窗控件（免 root，基本不可用）"
@@ -3277,19 +3277,19 @@
     },
     "OverlayService": {
       "name": "悬浮窗调起组件",
-      "help": "mod 里注册但平时不会被调用的备用 Service。用 root 执行 stopservice + startservice 就能让悬浮窗重新出现。\\n必须**先停再启** —— Service 还活着时 startservice 只走 onStartCommand，不会重建窗口。\\n★ 只在游戏进程已经在跑时才调起：进程不在时 startservice 会新起一个进程，那里原生库还没初始化，Launcher.onCreate -> new Menu -> Menu.Icon() 会抛 UnsatisfiedLinkError 把游戏整个搞崩。\\n默认 com.android.support.Launcher（JMBQ 3.4.0 实测）。"
+      "help": "mod 里注册但平时不会被调用的备用 Service。用 root 执行 stopservice + startservice 就能让悬浮窗重新出现。\n必须先停再启 —— Service 还活着时 startservice 只走 onStartCommand，不会重建窗口。\n★ 只在游戏进程已经在跑时才调起：进程不在时 startservice 会新起一个进程，那里原生库还没初始化，Launcher.onCreate -> new Menu -> Menu.Icon() 会抛 UnsatisfiedLinkError 把游戏整个搞崩。\n默认 com.android.support.Launcher（JMBQ 3.4.0 实测）。"
     },
     "OverlaySurvivalSeconds": {
       "name": "悬浮窗存活秒数（兜底值）",
-      "help": "对应 mod 内部 prefs 键 -98，可在 mod 面板「设置」页里改。\\nAlas 优先读设备上真实的 -98，读不到才用这里的值；游戏关着的时候会顺便把它写成这个值。\\n实测面板**每次被触摸都会重新计时**，所以操作期间不会中途消失；做完等它自灭再继续任务，避免面板挡住 Alas 的截图识别。默认 20。"
+      "help": "对应 mod 内部 prefs 键 -98，可在 mod 面板「设置」页里改。\nAlas 优先读设备上真实的 -98，读不到才用这里的值；游戏关着的时候会顺便把它写成这个值。\n实测面板每次被触摸都会重新计时，所以操作期间不会中途消失；做完等它自灭再继续任务，避免面板挡住 Alas 的截图识别。默认 20。"
     },
     "OverlayVisualVerify": {
       "name": "改完再截图复核一遍",
-      "help": "开启（默认）：改完之后，除了读 XML 精确核对外，再截一张图做第二道确认 ——\\n三个倍率：在截图上找滑块 thumb（青色圆点）的位置反解数值；「以德服人」：采样开关区域的颜色判断开/关。\\n这一条**只做记录**：识图读不出来（背景干扰等）不会判失败，权威判据始终是 XML。"
+      "help": "开启（默认）：改完之后，除了读 XML 精确核对外，再截一张图做第二道确认 ——\n三个倍率：在截图上找滑块 thumb（青色圆点）的位置反解数值；「以德服人」：采样开关区域的颜色判断开/关。\n这一条只做记录：识图读不出来（背景干扰等）不会判失败，权威判据始终是 XML。"
     },
     "OverlayFallbackPrefs": {
       "name": "失败时降级到 prefs",
-      "help": "关闭（默认）：悬浮窗方式没能确认生效时只报 CRITICAL 日志，绝不重启游戏。\\n开启则是安全网：自动降级去改共享配置 XML，宁可多一次重启，也不让敏感任务（演习/META/共斗）带着倍率开打 —— 但倍率可能仍是开着的。按需自开。"
+      "help": "关闭（默认）：悬浮窗方式没能确认生效时只报 CRITICAL 日志，绝不重启游戏。\n开启则是安全网：自动降级去改共享配置 XML，宁可多一次重启，也不让敏感任务（演习/META/共斗）带着倍率开打 —— 但倍率可能仍是开着的。按需自开。"
     }
   },
   "Storage": {

@@ -324,11 +324,33 @@ class ModHandler(ModuleBase):
             deep_get(self.config.data, 'ModHandler.ModHandler.OnKeys', default=''))
 
     @property
+    def ui_labels(self):
+        """ui 后端的开关文本（UiOffLabels + UiOnLabels），仅用于「有没有配」的判断。"""
+        labels = []
+        for path in ('ModHandler.ModHandler.UiOffLabels', 'ModHandler.ModHandler.UiOnLabels'):
+            for item in str(deep_get(self.config.data, path, default='') or '').replace(
+                    '；', ',').replace(';', ',').split(','):
+                if item.strip() and item.strip() not in labels:
+                    labels.append(item.strip())
+        return labels
+
+    @property
     def keys_configured(self):
-        """OffKeys / OnKeys 是否至少配了一个，没配时本功能只会打日志。
-        overlay 后端不写 prefs 键（识图点击开关，由 mod 自身落盘），不需要这两个配置。"""
+        """
+        本后端有没有可用的「怎么改」配置；没配时本功能只打日志、不动设备。
+
+        ★ 必须按后端区分，三个后端用的配置项完全不同：
+          overlay —— 靠识图点滑块/开关，不需要 OffKeys / OnKeys；
+          ui      —— 点的是 UiOffLabels / UiOnLabels，与 OffKeys / OnKeys 无关；
+          prefs   —— 才是真正写 OffKeys / OnKeys 的那个。
+        以前只有 overlay 走了特例，ui 也去查 OffKeys：于是「选 ui + 填了
+        UiOffLabels + OffKeys 留空」会一路走到「no keys configured, skipped」，
+        用户看到的是功能完全不生效，很难联想到是这里判错了。
+        """
         if self.backend == 'overlay':
             return True
+        if self.backend == 'ui':
+            return bool(self.ui_labels)
         return bool(self.off_keys or self.on_keys)
 
     # ------------------------------------------------------------ 状态落盘
@@ -389,12 +411,17 @@ class ModHandler(ModuleBase):
         """
         从设备上读取真实状态；后端不支持或读取失败时返回 None。
         这样用户手动动过悬浮窗也能被发现，而不是盲信本地缓存。
+
+        ★ 统一归一化成真 bool / None：识图路径（overlay / ui）容易带出 numpy 布尔，
+        而下游是用 `is True` / `is False` 做安全判定的（_stop_if_still_on、
+        check_then_set 的缓存写入），np.bool_(True) 会让那些判定静默失效。
         """
         try:
-            return self._backend.get_state()
+            state = self._backend.get_state()
         except Exception as e:
             logger.warning(f'ModHandler: read_backend_state failed: {e}')
             return None
+        return None if state is None else bool(state)
 
     def describe_state(self):
         """
@@ -486,11 +513,13 @@ class ModHandler(ModuleBase):
         只有设备确实还开着才等于封号风险。
 
         Returns:
-            bool: 回读确认倍率仍开着时抛 RequestHumanTakeover（不返回）；
-                  否则返回 False，调用方继续按「本次没改动」处理。
+            bool/None: 回读确认倍率仍开着时抛 RequestHumanTakeover（不返回）；
+                       否则返回**回读到的真实状态**（False = 确认已关，None = 读不到）。
+                       调用方用它决定要不要把「已达目标」写进本地缓存。
         """
-        if self.read_backend_state() is not True:
-            return False
+        observed = self.read_backend_state()
+        if observed is not True:
+            return observed
         logger.hr('ModHandler', level=1)
         logger.critical(
             f'ModHandler: 任务 `{task}` 需要关闭倍率，但关闭失败且设备回读确认倍率仍开着 —— '
@@ -529,7 +558,14 @@ class ModHandler(ModuleBase):
                 logger.warning('ModHandler 已关闭，但检测到该关倍率的任务里倍率仍开着，强制关闭')
                 changed = self.set_multiplier(False)
                 if not changed:
-                    self._stop_if_still_on(task)
+                    observed = self._stop_if_still_on(task)
+                    if observed is not False:
+                        # 与 check_then_set 同一套道理：没回读确认「已关」时不要写缓存，
+                        # 否则下次会拿这份缓存当成「设备已经是关的」而直接跳过。
+                        logger.warning(
+                            'ModHandler: 未能确认倍率已关（回读 '
+                            f'{"unknown" if observed is None else "ON"}），保留原有缓存')
+                        return False
                 self.set_state(False)
                 return changed
             return False
@@ -599,7 +635,24 @@ class ModHandler(ModuleBase):
             if want_on is False:
                 # 该关而没关掉 = 链路出了问题（后端异常、坐标漂移、key 映射错）。
                 # 不区分任务类型：确认设备上还开着就停机交人工。
-                self._stop_if_still_on(task)
+                # 返回值是回读到的真实状态，下面要用它决定缓存怎么写。
+                observed = self._stop_if_still_on(task)
+            else:
+                observed = self.read_backend_state()
+            self._last_want = want_on
+            if observed is not want_on:
+                # ★ 没达成目标时**不要**把目标写进缓存。
+                # 这份缓存会被 current_state() 当作「设备状态」的替身：一旦把
+                # 「已关」写进去，下一个敏感任务读到 current == want_on 就直接
+                # return，连写入都不再尝试 —— 那正是「以为关了其实没关」。
+                # 尤其「读不到状态（None）」时最危险：设备上到底开着没有我们并不
+                # 知道，更不能替它宣称已达成。宁可下次重新尝试。
+                logger.warning(
+                    f'ModHandler: 未能确认达成目标（task `{task}`，'
+                    f'target {"ON" if want_on else "OFF"}，回读 '
+                    f'{"unknown" if observed is None else ("ON" if observed else "OFF")}），'
+                    f'保留原有缓存，下次决策会重新尝试')
+                return False
             logger.warning(f'ModHandler: 后端没有改动任何开关（task `{task}`，'
                            f'target {"ON" if want_on else "OFF"}）')
         self._last_want = want_on

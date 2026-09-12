@@ -238,7 +238,11 @@ class ModPrefs(ModuleBase):
     def __init__(self, config=None, device=None):
         super().__init__(config=config, device=device)
         self.config = config
-        self.device = device
+        # device=None 时 ModuleBase 已经按 config 建好了 Device（它会去连模拟器），
+        # 无条件覆盖会把 self.device 变成 None，之后每个 adb 调用都会
+        # AttributeError: 'NoneType' has no attribute 'adb_shell'。
+        if device is not None:
+            self.device = device
 
     # ------------------------------------------------------------ 配置
     # 路径为 ModHandler.ModHandler.<参数>：ALAS 的任务名与参数组名同名时是两层

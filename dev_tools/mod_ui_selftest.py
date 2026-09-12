@@ -7,7 +7,7 @@ ModUi 自检 —— 免 root 后端（uiautomator2 点悬浮窗）的纯逻辑�
   3. 置位与读回：已经是目标状态不点；状态相反点一次；状态未知点两次兜底
   4. get_state 的三态判定（全关=False / 全开=True / 混合=None）
   5. 面板展开与收起的时机（含异常路径）
-  6. 找不到控件时回落到 UiTapPoints
+  6. 找不到控件时回落到 UiTapPoints（盲点 = 无法回读，按未达成上报，不谎报成功）
 
 注意：真机上悬浮窗可能不在辅助功能树里（FLAG_NOT_FOCUSABLE），
 那种情况只能靠 prefs 后端或坐标兜底，本测试覆盖的是「能拿到控件」时的行为。
@@ -232,14 +232,31 @@ ui, cfg, dev, d = make_ui([], labels=('不存在的开关',))
 result = ui.set_multiplier(False)
 check('找不到控件时返回 False', result is False)
 
-# 2.8 UiTapPoints 坐标兜底
+# 2.8 UiTapPoints 坐标兜底：会点，但**不能**因此宣称成功
+# 控件不在辅助功能树里时只能盲点，点完无法回读。以前这里乐观返回 True，
+# 于是 ModHandler 认为「已确认关掉」，敏感任务带着可能还开着的倍率开打 ——
+# 而且连回读复核都不会做。现在盲点一律按「未确认」上报。
 w = FakeWidget(None, '倍攻倍防', 'switch', True)
 ui, cfg, dev, d = make_ui([], labels=('倍攻倍防',), UiTapPoints='倍攻倍防=120,300')
 d.point_widgets[(120, 300)] = w
 w.ui = d
+eq('盲点时 _toggle 返回 None（点了但无法验证）', ui._toggle('倍攻倍防', False), None)
+check('坐标兜底确实点了配置的坐标', ('point', 120, 300) in d.click_log, str(d.click_log))
+eq('盲点后依然读不到状态 —— 这正是「无法确认」的根据', ui.get_state(), None)
+
+d.click_log.clear()
 result = ui.set_multiplier(False)
-check('坐标兜底被触发', result is True and ('point', 120, 300) in d.click_log,
-      str(d.click_log))
+check('盲点后 set_multiplier 如实返回 False，不谎报成功',
+      result is False and ('point', 120, 300) in d.click_log,
+      f'result={result} log={d.click_log}')
+
+# 2.8b 有控件时（能回读）仍然是 True —— 别把盲点的严格性带到正常路径上
+w = FakeWidget(None, '倍攻倍防', 'switch', True)
+ui, cfg, dev, d = make_ui([w])
+w.ui = d
+check('能拿到控件时依然确认成功并返回 True',
+      ui.set_multiplier(False) is True and w.checked is False,
+      f'checked={w.checked}')
 
 # ---------------------------------------------------------------- 3. get_state
 checker.header('3. get_state 三态判定')

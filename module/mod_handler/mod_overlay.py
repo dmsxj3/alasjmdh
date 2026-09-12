@@ -123,7 +123,11 @@ class ModOverlay(ModuleBase):
     def __init__(self, config=None, device=None):
         super().__init__(config=config, device=device)
         self.config = config
-        self.device = device
+        # device=None 时 ModuleBase 已经按 config 建好了 Device，不能无条件覆盖，
+        # 否则 self.device 变成 None，之后所有 adb 操作都会
+        # AttributeError: 'NoneType' has no attribute 'adb_shell'。
+        if device is not None:
+            self.device = device
         self._prefs = None
         self._screen = None
         self._prefs_cache = None          # (时间戳, 解析结果)；None 表示无缓存
@@ -153,9 +157,13 @@ class ModOverlay(ModuleBase):
 
     @property
     def fallback_enabled(self):
+        # 默认关：与 config_generated.py / args.json / argument.yaml / template.json
+        # 四处配置源一致（也见模块 docstring 的「默认关，打开后生效」）。
+        # 这里曾经写成 default=True，配置里缺这个键时会静默变成「允许重启游戏」，
+        # 与文档和用户偏好相反。
         return bool(deep_get(self.config.data,
                              'ModHandler.ModHandler.OverlayFallbackPrefs',
-                             default=True))
+                             default=False))
 
     @property
     def visual_verify(self):

@@ -188,6 +188,16 @@ _value_drift = [
 check('template.json 与 argument.yaml 默认值无漂移', not _value_drift,
       f'漂移={_value_drift}')
 
+# 防回归：代码里的「配置缺键时的缺省值」也必须与配置源一致。
+# mod_overlay.fallback_enabled 曾经写成 default=True，而四处配置源全是 false ——
+# 老实例（config 里没有这个键）或手工改过的 config 会静默变成「允许为了关倍率
+# 重启游戏」，与模块 docstring 写的「默认关」和用户偏好都相反。
+from module.mod_handler.mod_overlay import ModOverlay as _ModOverlay  # noqa: E402
+
+eq('overlay.fallback_enabled 的缺键缺省值 = 配置源默认值',
+   _ModOverlay(config=FakeConfig(), device=FakeDevice()).fallback_enabled,
+   bool(default_of(yaml_mod.get('OverlayFallbackPrefs'))))
+
 for lang in ['zh-CN', 'en-US', 'ja-JP', 'zh-TW']:
     path = os.path.join(ROOT, 'module', 'config', 'i18n', f'{lang}.json')
     with open(path, encoding='utf-8') as f:
@@ -216,6 +226,28 @@ for lang in ['zh-CN', 'en-US', 'ja-JP', 'zh-TW']:
                 _fmt_bad.append(f'{_key}.{_field} -> {type(_e).__name__}: {_e}')
     check(f'i18n {lang}: ModHandler 文案可安全 .format()（花括号已转义）',
           not _fmt_bad, f'异常={_fmt_bad}')
+
+    # 防回归（真踩过）：帮助文本里写成了 "\\n"（JSON 里转义成**字面反斜杠 + n**），
+    # GUI 上会原样显示 "\n" 而不是换行；同处还混用了 markdown 的 ** 粗体，
+    # 而 webui 不渲染 markdown，星号会直接露出来。
+    _esc_bad = []
+    _bold_bad = []
+
+    def _scan(prefix, node):
+        if isinstance(node, dict):
+            for k, v in node.items():
+                _scan(f'{prefix}.{k}' if prefix else k, v)
+        elif isinstance(node, str):
+            if (chr(92) + 'n') in node:
+                _esc_bad.append(prefix)
+            if '**' in node:
+                _bold_bad.append(prefix)
+
+    _scan('', i18n.get('ModHandler', {}))
+    check(f'i18n {lang}: 帮助文本没有字面反斜杠 n（应为真换行）',
+          not _esc_bad, f'异常={_esc_bad}')
+    check(f'i18n {lang}: 帮助文本没有 markdown 粗体星号（webui 不渲染）',
+          not _bold_bad, f'异常={_bold_bad}')
 
 # 防回归：ModHandler 参数组只能出现在 ModHandler 任务下。
 # 曾经它被挂在 GameManager 下（后来拆成独立任务），但 args.json 打补丁时
@@ -540,6 +572,74 @@ for _task in ('exercise', 'minigame'):
     except mh.RequestHumanTakeover:
         check(f'Enabled=False 下 {_task} 关失败时停机', True)
 
+
+# 4.14b ★ keys_configured 必须按后端区分（三个后端用的配置项完全不同）。
+# ui 后端点的是 UiOffLabels / UiOnLabels，跟 OffKeys / OnKeys 无关；以前它也被要求
+# 填 OffKeys，于是「Backend=ui + 填了 UiOffLabels + OffKeys 留空」会一路走到
+# 「no keys configured, skipped」——用户看到的是功能完全不生效，很难联想到是这里。
+h, cfg, dev = new_handler(Backend='ui', OffKeys='', OnKeys='', UiOffLabels='倍攻倍防')
+check('Backend=ui + 配了 UiOffLabels -> keys_configured=True', h.keys_configured is True)
+h, cfg, dev = new_handler(Backend='ui', OffKeys='', OnKeys='',
+                          UiOffLabels='', UiOnLabels='倍攻倍防')
+check('Backend=ui 只配 UiOnLabels 也算配了', h.keys_configured is True)
+h, cfg, dev = new_handler(Backend='ui', OffKeys='', OnKeys='')
+check('Backend=ui 什么都没配 -> keys_configured=False', h.keys_configured is False)
+h, cfg, dev = new_handler(Backend='ui', OffKeys='1=1', OnKeys='1=1000')
+check('Backend=ui 只填了 OffKeys/OnKeys（ui 用不上）-> 仍算没配',
+      h.keys_configured is False)
+h, cfg, dev = new_handler(Backend='prefs', OffKeys='', OnKeys='')
+check('Backend=prefs 没配 OffKeys/OnKeys -> keys_configured=False',
+      h.keys_configured is False)
+h, cfg, dev = new_handler(Backend='overlay', OffKeys='', OnKeys='')
+check('Backend=overlay 不需要 key -> keys_configured=True', h.keys_configured is True)
+
+# 而且 ui 只配了标签时必须真的走到后端（不是停在「没配 key」那一步）
+h, cfg, dev = new_handler(Backend='ui', OffKeys='', OnKeys='', UiOffLabels='倍攻倍防')
+h.set_state(True)                       # 上次决定是开
+h._applied.clear()
+h.check_then_set('exercise')            # 演习要关 -> 应该真的调一次后端
+eq('ui 后端只配标签时确实执行了关闭', h._applied, [False])
+
+# 4.15d2 ★ 未确认达成时不能把「已达成」写进缓存。
+# get_state() 的缓存会被 current_state() 当作「设备状态」的替身：一旦在
+# 「后端没写成 + 回读读不到（None）」时把 multiplier_on=False 落盘，下一个敏感
+# 任务就会读到 current == want_on 而直接 return —— 连写入都不再尝试，
+# 正是「以为关了其实没关」。所以只有回读确认已达目标时才更新缓存。
+h, cfg, dev = new_handler()
+h.set_state(True)                        # 缓存：上次决定是开
+h.set_multiplier = lambda mode: False    # 后端没写成
+h.read_backend_state = lambda: None      # 而且回读读不到设备状态
+eq('未确认达成时 check_then_set 返回 False', h.check_then_set('exercise'), False)
+eq('未确认达成时不把「已关」写进缓存（否则下次直接跳过写入）', h.get_state(), True)
+
+# 反过来：回读确认设备确实已经在目标状态时，缓存照旧要更新。
+# 注意必须让两次回读给出不同结果：决策阶段读到 None（否则 current == want_on
+# 会在入口就 return，根本走不到这里），复核阶段才读到 False。
+h, cfg, dev = new_handler()
+h.set_state(True)
+h.set_multiplier = lambda mode: False
+_reads = iter([None, False])             # 决策时读不到，复核时确认已关
+h.read_backend_state = lambda: next(_reads, False)
+eq('后端没动但设备确认已达目标 -> 仍返回 False', h.check_then_set('exercise'), False)
+eq('设备确认已达目标时缓存更新为关', h.get_state(), False)
+
+# 4.15d3 后果断言：一次「读不到状态」的失败之后，下一个敏感任务必须仍然去尝试写入。
+# 这条正是 4.15d2 要防的场景 —— 缓存被污染成「已关」的话，第二次会一次后端调用都没有。
+h, cfg, dev = new_handler()
+h.set_state(True)
+h.read_backend_state = lambda: None
+_calls = []
+
+
+def _always_fail(mode):
+    _calls.append(mode)
+    return False
+
+
+h.set_multiplier = _always_fail
+h.check_then_set('exercise')
+h.check_then_set('exercise')
+eq('读不到状态导致的失败不会让下一次敏感任务跳过写入', _calls, [False, False])
 
 # 4.15e 后端抛异常必须落到「关失败」判定上。
 # 以前异常直接冒泡到 alas.py 的宽 except，只记一条 warning 就继续跑任务 ——

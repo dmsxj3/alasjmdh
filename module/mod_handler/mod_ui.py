@@ -14,6 +14,8 @@ ModUi — 通过 uiautomator2 操作悬浮窗开关（无 root 时的兜底后�
   ModHandler.UiOffLabels    关闭倍率时要置为「关」的开关文本，逗号分隔
   ModHandler.UiOnLabels     恢复时要置为「开」的开关文本，逗号分隔（留空则复用 UiOffLabels）
   ModHandler.UiTapPoints    找不到控件时的坐标兜底，"文本=x,y;文本=x,y"
+                            （只能盲点、无法回读确认，所以按「未达成」上报，
+                              不会让上层误以为倍率已经关掉了）
 """
 import time
 
@@ -170,7 +172,9 @@ class ModUi(ModuleBase):
     def _toggle(self, label, want_on):
         """
         Returns:
-            bool: 是否成功处理
+            True  = 已点且回读确认到达目标状态
+            False = 没找到控件、且没有坐标兜底；或点了但回读确认没到达
+            None  = 控件不在辅助功能树里，只能盲点坐标 —— 点了但**无法验证**
         """
         el, kind = self._find_switch(label)
         if el is not None:
@@ -194,13 +198,18 @@ class ModUi(ModuleBase):
             time.sleep(0.3)
             return self._is_on(el, kind) == want_on
 
-        # 坐标兜底：盲点，无法读回校验，只能乐观返回
+        # 坐标兜底：控件根本不在辅助功能树里，点下去也无法回读校验。
+        # ★ 这里绝不能返回 True。True 会被 ModHandler 当成「已确认关掉」，
+        # 于是敏感任务带着可能还开着的倍率开打，而且连回读复核都不会再做一次 ——
+        # 正是本功能要防的封号风险。返回 None = 「点了，但没验证」，
+        # 由 set_multiplier 按「未达成」如实上报，让上层去回读 / 告警。
         point = self.tap_points.get(label)
         if point:
-            logger.info(f'ModUi: `{label}` not found as widget, tapping {point} blindly')
+            logger.warning(f'ModUi: `{label}` 不在辅助功能树里，只能盲点坐标 {point} —— '
+                           f'已点击但无法回读确认，按「未确认」上报')
             self.d.click(point[0], point[1])
             time.sleep(0.3)
-            return True
+            return None
 
         logger.warning(f'ModUi: `{label}` not found and no fallback coordinate configured')
         return False
@@ -309,6 +318,11 @@ class ModUi(ModuleBase):
 
         Args:
             mode: True = 开倍率，False = 关倍率
+        Returns:
+            bool: **确认**所有开关都到达目标状态时为 True。
+                  盲点坐标（控件不在辅助功能树里，见 UiTapPoints）时无法回读，
+                  按未达成处理并返回 False —— 宁可由上层去回读 / 告警，
+                  也不能谎报成功让敏感任务带着倍率开打。
         """
         labels = self.off_labels
         if mode and self.on_labels:
@@ -323,9 +337,13 @@ class ModUi(ModuleBase):
             for label in labels:
                 results[label] = self._toggle(label, mode)
 
-        ok = all(results.values())
+        ok = all(v is True for v in results.values())
+        unverified = [k for k, v in results.items() if v is None]
         logger.attr('ModUi', f'{"ON" if mode else "OFF"} -> {results}')
-        if not ok:
+        if unverified:
+            logger.warning(f'ModUi: {unverified} 只能盲点坐标、无法回读确认，按「未达成」处理。'
+                           f'建议改用 prefs 后端（需 root）。')
+        elif not ok:
             logger.warning('ModUi: 部分开关未能确认，可能悬浮窗不在辅助功能树中。'
                            '建议改用 prefs 后端（需 root）或配置 UiTapPoints 坐标。')
         return ok
