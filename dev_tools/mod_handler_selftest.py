@@ -83,7 +83,7 @@ missing_nochange = [t for t in mh.NO_CHANGE_TASKS if t not in real_tasks and t n
 check('不干预任务名全部存在（LEGACY 除外）', not missing_nochange, f'缺失={missing_nochange}')
 
 # 三个列表必须覆盖所有真实任务，避免出现「既没决策也非明确不干预」的模糊任务
-covered = set(SENSITIVE_DEFAULT) | set(mh.GROUP_NORMAL) | set(mh.NO_CHANGE_TASKS) | {'minigame'}
+covered = set(SENSITIVE_DEFAULT) | set(mh.GROUP_NORMAL) | set(mh.NO_CHANGE_TASKS)
 unknown = sorted(set(real_tasks) - covered)
 check('所有真实任务都被显式分类', not unknown, f'未分类={unknown}')
 
@@ -547,10 +547,11 @@ check('常规任务开失败不停机、返回 False', changed is False)
 # 只要「该关倍率时没关掉」且回读确认设备上倍率仍开着，就停机 ——
 # 该关而没关本身就说明链路出了问题（后端坏了、坐标漂移、key 映射错），
 # 带着「以为关了其实没关」的状态继续跑就是封号风险。
-# 所以 minigame（GROUP_ALWAYS_OFF，策略同样要求关）与未列出任务
-# （沿用上次决定 = 关）同样在列，不再按「敏感 / 非敏感」区分。
+# 所以未列出任务（沿用上次决定 = 关，如 commission）同样在列，不再按「敏感 / 非敏感」区分。
+# （minigame 已移出关闭组、进入 NO_CHANGE_TASKS：倍率对小游戏无影响，
+#   不再为它开关 —— 2026-09-12 按 AlasGG 语义核对后调整。）
 for _task, _label in (('exercise', '演习'), ('coalition', '共斗'),
-                      ('minigame', '小游戏'), ('commission', '未列出任务')):
+                      ('commission', '未列出任务')):
     h, cfg, dev = new_handler()
     h.set_state(False)                     # 缓存：上次决定是关
     h.set_multiplier = lambda mode: False
@@ -571,7 +572,8 @@ changed = h.check_then_set('exercise')
 check('回读确认已关时不停机、返回 False', changed is False)
 
 # 4.15d Enabled=False 的强制关闭分支同样按「该关就停」处理
-for _task in ('exercise', 'minigame'):
+# （minigame 已移入 NO_CHANGE_TASKS，不再属于强制关闭范围）
+for _task in ('exercise',):
     h, cfg, dev = new_handler(Enabled=False)
     h.set_multiplier = lambda mode: False
     h.read_backend_state = lambda: True

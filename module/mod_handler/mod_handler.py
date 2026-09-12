@@ -115,10 +115,11 @@ GROUP_NORMAL = [
     'c124_large_leveling',
 ]
 
-# 无论如何都关闭倍率的任务（小游戏里倍率无意义且会干扰）
-GROUP_ALWAYS_OFF = [
-    'minigame',
-]
+# 无论如何都关闭倍率的任务。
+# ★ 现为空列表：曾按 AlasGG 原版把 minigame（小游戏）放在这里，但倍率/战力
+#   修改只影响战斗数值，小游戏读不到也用不上这些值，实测开/关倍率都能正常
+#   跑 —— 为它每个任务边界开关一次纯属浪费时间，已移入 NO_CHANGE_TASKS。
+GROUP_ALWAYS_OFF = []
 
 # 与倍率无关的任务：通用/调度类、纯后勤类。
 # 这些任务既不该开也不该关，直接跳过，避免多一次「写配置 + 重启游戏」。
@@ -148,6 +149,8 @@ NO_CHANGE_TASKS = [
     'gacha',
     'freebies',
     'private_quarters',
+    # 小游戏：不读倍率/战力数值，开不开都能跑，不做任何干预（省一次开关）
+    'minigame',
     'opsi_shop',
     'opsi_voucher',
     'opsi_daemon',
@@ -203,7 +206,7 @@ def resolve_policy(option):
 
 def sensitive_tasks(option=None):
     """
-    返回该策略下「必须关闭倍率」的任务名（不含 minigame 这类无关项）。
+    返回该策略下「必须关闭倍率」的任务名（演习 + META + 共斗）。
     仅用于日志与自检展示。
     """
     disabled, _ = resolve_policy(option or 'disable_all_dangerous_task')
