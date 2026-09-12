@@ -303,13 +303,12 @@ class ModUi(ModuleBase):
         return {'option': 'unknown',
                 'detail': '控件读不到（悬浮窗多半不在辅助功能树里），建议改用 prefs 后端'}
 
-    def set_multiplier(self, mode: bool, restart=None):
+    def set_multiplier(self, mode: bool):
         """
-        点悬浮窗开关。
+        点悬浮窗开关。直接点开关即时生效，不需要重启游戏。
 
         Args:
-            restart: 仅为与 prefs 后端保持同一签名而存在，ui 后端用不上
-                     （直接点开关就是即时生效，不需要重启游戏）。
+            mode: True = 开倍率，False = 关倍率
         """
         labels = self.off_labels
         if mode and self.on_labels:

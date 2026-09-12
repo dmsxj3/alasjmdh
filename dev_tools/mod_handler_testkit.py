@@ -102,34 +102,7 @@ def install_stubs():
     exc_mod.ScriptError = Exception
     put('module.exception', exc_mod)
 
-    # module.handler.login
-    # mod_prefs 重启后会调用 LoginHandler.handle_app_login() 等登录。
-    # 真实的 module.handler.login 会拉进整条 OCR/截图依赖，测试里换成桩，
-    # 并把调用记录下来供断言（login_calls）。
-    login_mod = types.ModuleType('module.handler.login')
-
-    class LoginHandler:
-        def __init__(self, config, device=None, task=None):
-            self.config = config
-            self.device = device
-
-        def handle_app_login(self):
-            login_calls.append('handle_app_login')
-
-        def app_start(self):
-            login_calls.append('app_start')
-
-        def app_restart(self):
-            login_calls.append('app_restart')
-
-    login_mod.LoginHandler = LoginHandler
-    put('module.handler.login', login_mod)
-
     _installed = True
-
-
-# module.handler.login 桩的调用记录，测试里断言用
-login_calls = []
 
 
 # ---------------------------------------------------------------- 假对象
@@ -144,8 +117,6 @@ class FakeConfig:
             'PrefsFile': 'com.bilibili.azurlane_preferences',
             'OffKeys': '1=1,2=1,3=1',
             'OnKeys': '1=1000,2=1000,3=1000',
-            'RestartGame': True,
-            'RestartTask': 'always',
             'SensitiveTask': 'disable_all_dangerous_task',
             'UiOpenPoint': '',
             'UiClosePoint': '',

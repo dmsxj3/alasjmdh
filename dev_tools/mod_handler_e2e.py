@@ -5,7 +5,8 @@
   * 前者把 set_multiplier 拦截掉，只验证「什么时候决定」
   * 本脚本不拦截任何东西，走完整链路：
         ModHandler.check_then_set -> ModPrefs.set_multiplier
-        -> 读 prefs XML -> 停游戏 -> 推送改写后的 XML -> 重启游戏
+        -> 读 prefs XML -> 停游戏 -> 推送改写后的 XML -> 游戏保持关闭
+        （写完不主动拉起，ALAS 发现游戏没跑会自动排 Restart 任务）
     设备侧用真机抓下来的 prefs 内容做假设备，因此可以断言每一步之后的 XML。
 
 顺序上模拟 alas.py 的调度循环：启动纠偏一次 -> 每个任务开始前 check_then_set。
@@ -130,7 +131,7 @@ def build(config_name, xml=REAL_PREFS, **overrides):
         'Backend': 'prefs',
         'OffKeys': OFF_KEYS,
         'OnKeys': ON_KEYS,
-        'RestartGame': True,
+
         'SensitiveTask': 'disable_all_dangerous_task',
     }
     values.update(overrides)
@@ -155,8 +156,8 @@ dev.calls.clear()
 first = h.check_then_set('exercise')
 check('第一次敏感任务：写了一次并关掉倍率',
       first is True and dev.multiplier_on is False, f'writes={dev.writes}')
-check('敏感任务：停游戏 -> 推送 -> 重启游戏（AlasGG 式）',
-      dev.writes == ['app_stop', f'adb_push:{TMP_REMOTE}', 'app_start'], str(dev.writes))
+check('敏感任务：停游戏 -> 推送 -> 游戏保持关闭（交给 ALAS 的 Restart 任务）',
+      dev.writes == ['app_stop', f'adb_push:{TMP_REMOTE}'], str(dev.writes))
 
 for task in ['exercise', 'opsi_ash_beacon', 'opsi_ash_assist', 'raid', 'raid_daily',
              'coalition', 'coalition_sp']:
@@ -171,8 +172,8 @@ dev.calls.clear()
 changed = h.check_then_set('main')
 check('第一个常规任务：写了一次并开启倍率',
       changed is True and dev.multiplier_on is True, f'writes={dev.writes}')
-check('常规任务恢复：停游戏 -> 推送 -> 重启（默认 always 策略）',
-      dev.writes == ['app_stop', f'adb_push:{TMP_REMOTE}', 'app_start'], str(dev.writes))
+check('常规任务恢复：游戏没在跑，直接推送，写完保持关闭',
+      dev.writes == [f'adb_push:{TMP_REMOTE}'], str(dev.writes))
 
 for task in ['event_a', 'hard', 'daily', 'opsi_explore', 'guild', 'war_archives']:
     dev.calls.clear()
@@ -227,8 +228,8 @@ dev2.calls.clear()
 changed = h2.check_on_startup()
 check('启动纠偏把倍率关回', changed is True and dev2.multiplier_on is False,
       f'writes={dev2.writes}')
-check('纠偏同样走完整流程',
-      dev2.writes == ['app_stop', f'adb_push:{TMP_REMOTE}', 'app_start'], str(dev2.writes))
+check('纠偏同样走完整流程（停游戏 -> 推送 -> 保持关闭）',
+      dev2.writes == ['app_stop', f'adb_push:{TMP_REMOTE}'], str(dev2.writes))
 
 # ---------------------------------------------------------------- 6
 checker.header('6. 未配置 key 时不产生任何设备动作')

@@ -111,9 +111,9 @@ yaml_mod = load_argument('ModHandler')
 eq('argument.yaml: ModHandler.Enabled', default_of(yaml_mod.get('Enabled')), True)
 eq('argument.yaml: ModHandler.SensitiveTask 默认',
    default_of(yaml_mod.get('SensitiveTask')), 'disable_all_dangerous_task')
-eq('argument.yaml: ModHandler.Backend 默认', default_of(yaml_mod.get('Backend')), 'prefs')
-eq('argument.yaml: ModHandler.RestartTask 默认',
-   default_of(yaml_mod.get('RestartTask')), 'always')
+eq('argument.yaml: ModHandler.Backend 默认', default_of(yaml_mod.get('Backend')), 'overlay')
+check('argument.yaml: RestartTask 已删除（写完不重启，交给 ALAS 的 Restart 任务）',
+      'RestartTask' not in yaml_mod)
 
 with open(args_json, encoding='utf-8') as f:
     args = json.load(f)
@@ -127,6 +127,8 @@ eq('args.json: ModHandler.Enabled 默认',
    args['ModHandler']['ModHandler']['Enabled']['value'], True)
 eq('args.json: SensitiveTask 默认',
    args['ModHandler']['ModHandler']['SensitiveTask']['value'], 'disable_all_dangerous_task')
+check('args.json: RestartTask 已删除（写完不重启，交给 ALAS 的 Restart 任务）',
+      'RestartTask' not in args['ModHandler']['ModHandler'])
 eq('args.json: SensitiveTask 选项',
    args['ModHandler']['ModHandler']['SensitiveTask']['option'],
    ['disable_all_dangerous_task', 'disable_guild_and_dangerous',
@@ -238,8 +240,8 @@ eq('真实配置形状下 off_keys 能读到 OffKeys',
 _real_prefs = ModPrefs(config=_real_cfg, device=None)
 eq('真实配置形状下 ModPrefs.package 能读到 PackageName',
    _real_prefs.package, args['ModHandler']['ModHandler']['PackageName']['value'])
-eq('真实配置形状下 ModPrefs.restart_policy 能读到 RestartTask',
-   _real_prefs.restart_policy, args['ModHandler']['ModHandler']['RestartTask']['value'])
+check('ModPrefs 已无 restart_policy（重启职责移交 ALAS 调度层）',
+      not hasattr(_real_prefs, 'restart_policy'))
 
 # ---------------------------------------------------------------- 4. 状态机
 checker.header('4. 状态机（假设备）')
@@ -261,17 +263,16 @@ def new_handler(**config_values):
     dev = FakeDevice()
     handler = mh.ModHandler(config=cfg, device=dev)
     applied = []
-    restarts = []
 
-    def fake_set_multiplier(mode, restart=None):
+    # 严格单参签名：策略层只决定「开/关」，不再传 restart 之类的参数；
+    # 若调用点残留旧参数（restart=True 等），这里会直接 TypeError。
+    def fake_set_multiplier(mode):
         applied.append(mode)
-        restarts.append(restart)
         return True   # 与真实后端一致：写入成功返回 True
 
     handler.set_multiplier = fake_set_multiplier
     handler.read_backend_state = lambda: None
     handler._applied = applied
-    handler._restarts = restarts
     return handler, cfg, dev
 
 
@@ -316,37 +317,16 @@ check('连续三次 exercise 只在第一次动作',
       first is True and second is False and third is False
       and h._applied == [False], f'applied={h._applied}')
 
-# 4.2b 重启策略必须被三处调用点统一遵守。
-# 曾经在调用点硬编码 restart=True，导致 RestartTask=never 被无视
-# （用户设了"从不重启"却还是重启）。
-h, cfg, dev = new_handler(RestartTask='always')
+# 4.2b 策略层只传 mode：重启游戏不再由本功能决定（写完游戏保持关闭，
+# ALAS 发现游戏没跑会自动排 Restart 任务）。fake 用严格单参签名，
+# 调用点若残留 restart=True 之类的旧参数会直接 TypeError，本节就会失败。
+h, cfg, dev = new_handler()
 h.check_then_set('exercise')
-eq('always: 敏感任务关倍率时重启', h._restarts, [True])
+eq('敏感任务关倍率：单参调用、动作一次', h._applied, [False])
 h.check_then_set('main')
-eq('always: 常规任务开倍率也重启', h._restarts, [True, True])
-h.check_then_set('opsi_ash_beacon')
-eq('always: META 任务也重启', h._restarts, [True, True, True])
-h.check_then_set('coalition')
-eq('状态已关时不动作，所以不追加', h._restarts, [True, True, True])
-
-h, cfg, dev = new_handler(RestartTask='never')
-h.check_then_set('exercise')
-eq('never: 敏感任务关倍率时不动游戏（no_stop）', h._restarts, ['no_stop'])
-h.check_then_set('main')
-eq('never: 常规任务开倍率也不动游戏', h._restarts, ['no_stop', 'no_stop'])
-
-h, cfg, dev = new_handler(RestartTask='sensitive_only')
-h.check_then_set('exercise')
-eq('sensitive_only: 敏感任务关倍率时重启', h._restarts, [True])
-h.check_then_set('main')
-eq('sensitive_only: 常规任务开倍率不重启', h._restarts, [True, False])
-
-# 纠偏路径同样遵守策略
-h, cfg, dev = new_handler(RestartTask='never')
-h.set_state(False)
-h.read_backend_state = lambda: True
-h.check_on_startup()
-eq('never: 启动纠偏也不动游戏', h._restarts, ['no_stop'])
+eq('常规任务开倍率：单参调用、动作一次', h._applied, [False, True])
+h.check_then_set('event_a')
+eq('状态已开时不动作', h._applied, [False, True])
 
 # 4.3 未列出任务沿用上次决定（共斗 -> commission -> main3 不能中途把倍率顶开）
 h, cfg, dev = new_handler()
@@ -464,7 +444,7 @@ check('configured=True（默认）', new_handler()[0].keys_configured is True)
 
 # 4.15 后端写失败时如实上报，不谎报成功
 h, cfg, dev = new_handler()
-h.set_multiplier = lambda mode, restart=None: False      # 后端没写成
+h.set_multiplier = lambda mode: False      # 后端没写成
 h.read_backend_state = lambda: None
 changed = h.check_then_set('exercise')
 check('后端未改动时 check_then_set 返回 False', changed is False)

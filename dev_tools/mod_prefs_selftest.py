@@ -4,11 +4,13 @@ ModPrefs 自检 —— XML 读写逻辑 + set_multiplier 的完整编排（假�
 覆盖：
   1. parse / build_xml 往返、类型变化、新增 key、其它条目与顺序保留
   2. 值格式化
-  3. set_multiplier 的完整编排：读 XML -> 停游戏 -> 推送并覆盖 -> 重启游戏
-  4. 已是目标状态时不写、不停、不重启
+  3. set_multiplier 的完整编排：读 XML -> 停游戏 -> 推送并覆盖 -> 游戏保持关闭
+     （写完不主动拉起，ALAS 发现游戏没跑会自动排 Restart 任务）
+  4. 已是目标状态时不写、不停
   5. root 不可用 / 读不到 prefs / OffKeys 为空 时的行为
   6. get_state 的三态判定与「用户手动改动」识别
-  7. Alas.Error.HandleError 关闭时退化为 am force-stop / monkey
+  7. 写入后回读校验失败必须如实返回 False（不谎报成功）
+  8. Alas.Error.HandleError 关闭时停游戏退化为 am force-stop
 
 真实设备只读验证在 dev_tools/mod_handler_doctor.py，那里会用你的模拟器实测。
 """
@@ -18,7 +20,7 @@ import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from mod_handler_testkit import (  # noqa: E402
-    Checker, FakeConfig, FakeDevice, RequestHumanTakeover, install_stubs, login_calls,
+    Checker, FakeConfig, FakeDevice, RequestHumanTakeover, install_stubs,
 )
 
 install_stubs()
@@ -144,47 +146,19 @@ def make_prefs(**config_values):
     return ModPrefs(config=cfg, device=dev), cfg, dev
 
 
-# 2.1b 重启后必须等登录（否则 Alas 会对着加载界面截图，刷 Unknown ui page 然后崩）
+# 2.1 关倍率：停游戏 -> 写入 -> 游戏保持关闭（ALAS 需要时会自己拉起）
 p, cfg, dev = make_prefs()
-dev.config = cfg                      # 模拟 alas.py 绑定好的 config
-login_calls.clear()
-p.set_multiplier(False, restart=True)
-eq('重启后调用了 handle_app_login 等登录', login_calls, ['handle_app_login'])
-check('等登录发生在 app_start 之后', 'app_start' in dev.calls, str(dev.calls))
-
-# 没有绑定 config 的裸设备（例如测试环境）应跳过登录，而不是崩
-p2, cfg2, dev2 = make_prefs()
-login_calls.clear()
-p2.set_multiplier(False, restart=True)
-eq('未绑定 config 时跳过登录处理', login_calls, [])
-
-# 登录抛异常不能把任务链打断
-_login_cls = sys.modules['module.handler.login'].LoginHandler
-_bad = type('BadLoginHandler', (_login_cls,), {
-    'handle_app_login': lambda self: (_ for _ in ()).throw(RuntimeError('login stuck')),
-})
-sys.modules['module.handler.login'].LoginHandler = _bad
-try:
-    p3, cfg3, dev3 = make_prefs()
-    dev3.config = cfg3
-    changed = p3.set_multiplier(False, restart=True)
-    check('登录失败时不抛异常、仍视为写入成功', changed is True)
-finally:
-    sys.modules['module.handler.login'].LoginHandler = _login_cls
-
-# 2.1 关倍率（restart=True，敏感任务的走法：停游戏 -> 写入 -> 立刻拉起来）
-p, cfg, dev = make_prefs()
-changed = p.set_multiplier(False, restart=True)
+changed = p.set_multiplier(False)
 check('关倍率返回 True', changed is True)
 eq('设备上 1/2/3 已被写成 1',
    (parse(dev.xml)['1'], parse(dev.xml)['2'], parse(dev.xml)['3']),
    (('int', '1'), ('int', '1'), ('int', '1')))
 check('写入前停游戏', 'app_stop' in dev.calls, str(dev.calls))
-check('写入后重启游戏', 'app_start' in dev.calls, str(dev.calls))
-check('先停后写再启动',
+check('写完不主动拉起游戏（交给 ALAS 的 Restart 任务）', 'app_start' not in dev.calls,
+      str(dev.calls))
+check('先停后写',
       dev.calls.index('app_stop')
-      < dev.calls.index('adb_push:/data/local/tmp/_alas_mod_prefs.xml')
-      < dev.calls.index('app_start'), str(dev.calls))
+      < dev.calls.index('adb_push:/data/local/tmp/_alas_mod_prefs.xml'), str(dev.calls))
 check('推送后 cp 到真实路径',
       any('cp /data/local/tmp/_alas_mod_prefs.xml ' + PREF_PATH in c for c in dev.calls),
       str([c for c in dev.calls if c.startswith('adb_shell')]))
@@ -193,31 +167,16 @@ check('恢复属主与权限',
       and any('chmod 660' in c for c in dev.calls))
 check('清理临时文件', any('rm -f /data/local/tmp/_alas_mod_prefs.xml' in c for c in dev.calls))
 
-# 2.1b restart=False（普通任务）：只停游戏写配置，不拉起来
+# 2.2 再开回来（2.1 已把倍率关掉、游戏停了；设备先处于「关」状态，直接写）
 p, cfg, dev = make_prefs()
-changed = p.set_multiplier(False, restart=False)
-check('restart=False 时仍然写入', changed is True)
-check('restart=False 时不自动启动游戏', 'app_start' not in dev.calls, str(dev.calls))
-check('restart=False 时确实停了游戏（否则写入会被覆盖）',
-      'app_stop' in dev.calls, str(dev.calls))
-
-# 2.2 再开回来
-changed = p.set_multiplier(True, restart=True)
+dev.xml = build_xml(SAMPLE, {'1': 1, '2': 1, '3': 1})
+dev.running = False
+changed = p.set_multiplier(True)
 check('开倍率返回 True', changed is True)
 eq('设备上 1/2/3 已回到 1000',
    (parse(dev.xml)['1'], parse(dev.xml)['2'], parse(dev.xml)['3']),
    (('int', '1000'), ('int', '1000'), ('int', '1000')))
-
-# 2.2b restart 缺省：按 RestartTask 策略
-p, cfg, dev = make_prefs(RestartTask='always')
-dev.xml = build_xml(SAMPLE, {'1': 1000, '2': 1000, '3': 1000})
-p.set_multiplier(False)
-check('策略 always：自动重启', 'app_start' in dev.calls, str(dev.calls))
-
-p, cfg, dev = make_prefs(RestartTask='sensitive_only')
-dev.xml = build_xml(SAMPLE, {'1': 1000, '2': 1000, '3': 1000})
-p.set_multiplier(False)
-check('策略 sensitive_only：不自动重启', 'app_start' not in dev.calls, str(dev.calls))
+check('游戏没在跑就不停', 'app_stop' not in dev.calls, str(dev.calls))
 
 # 2.3 幂等：设备已是目标状态时只读探测，不发生任何写动作
 p, cfg, dev = make_prefs()
@@ -261,35 +220,33 @@ check('游戏未运行时不停不启', 'app_stop' not in dev.calls and 'app_sta
       str(dev.calls))
 check('游戏未运行时仍完成写入', parse(dev.xml)['1'] == ('int', '1'))
 
-# 2.8 写入抛异常也要把游戏拉起来，不能留下黑屏
-p, cfg, dev = make_prefs()
-original = ModPrefs.write_raw
+# 2.8 写入抛异常时向上传播；游戏保持关闭，交给 ALAS 的错误处理接管
 
 
 def boom(self, xml):
     raise RuntimeError('push failed')
 
 
+p, cfg, dev = make_prefs()
+original = ModPrefs.write_raw
 ModPrefs.write_raw = boom
 try:
-    p.set_multiplier(False, restart=True)
+    p.set_multiplier(False)
     check('写入失败时向上抛异常', False, '没有抛异常')
 except RuntimeError as e:
     check('写入失败时向上抛异常', 'push failed' in str(e))
 finally:
     ModPrefs.write_raw = original
-check('写入失败后仍然重启了游戏', 'app_start' in dev.calls, str(dev.calls))
+check('写入失败后游戏保持关闭', 'app_start' not in dev.calls, str(dev.calls))
 
-# 2.9 HandleError 关闭时退化路径
+# 2.9 HandleError 关闭时停游戏退化为 am force-stop
 p, cfg, dev = make_prefs()
 dev.raise_on_app_stop = RequestHumanTakeover('No app stop/start, because HandleError disabled')
-dev.raise_on_app_start = RequestHumanTakeover('No app stop/start, because HandleError disabled')
-changed = p.set_multiplier(False, restart=True)
+changed = p.set_multiplier(False)
 check('HandleError 关闭时仍完成关倍率', changed is True)
 check('退化为 am force-stop',
       any('am force-stop com.bilibili.azurlane' in c for c in dev.calls), str(dev.calls))
-check('退化为 monkey 启动',
-      any('monkey -p com.bilibili.azurlane' in c for c in dev.calls), str(dev.calls))
+check('全程不主动启动游戏', 'app_start' not in dev.calls, str(dev.calls))
 
 # 2.10 写入后回读校验
 p, cfg, dev = make_prefs()                       # 设备上倍率开着
@@ -302,27 +259,17 @@ p, cfg, dev = make_prefs()
 dev.xml = build_xml(SAMPLE, {'1': 1})       # 半开半关 -> 读不到明确状态
 eq('verify_applied 读不到状态时返回 None', p.verify_applied(False), None)
 
-# 2.11 写入成功但重启失败：不能把异常吞掉
-p, cfg, dev = make_prefs()
-dev.raise_on_app_start = RuntimeError('monkey: inaccessible or not found')
+# 2.11 回读校验失败必须如实返回 False —— "以为关了其实没关"正是封号风险
+p, cfg, dev = make_prefs()                       # 设备上倍率开着，目标是关
+_unchanged_xml = dev.xml
+_real_write = ModPrefs.write_raw
+# 模拟"写入没有生效"：推送的内容仍是旧值，回读自然对不上
+ModPrefs.write_raw = lambda self, xml: _real_write(self, _unchanged_xml)
 try:
-    p.set_multiplier(False, restart=True)
-    check('重启失败时向上抛异常', False, '没有抛异常')
-except RuntimeError as e:
-    check('重启失败时向上抛异常', 'monkey' in str(e), str(e))
-
-# 2.12 写入成功、重启失败但写入本身也失败时，以写入异常为准
-p, cfg, dev = make_prefs()
-dev.raise_on_app_start = RuntimeError('monkey: inaccessible or not found')
-original = ModPrefs.write_raw
-ModPrefs.write_raw = boom
-try:
-    p.set_multiplier(False, restart=True)
-    check('写入与重启都失败时抛出写入异常', False, '没有抛异常')
-except RuntimeError as e:
-    check('写入与重启都失败时抛出写入异常', 'push failed' in str(e), str(e))
+    changed = p.set_multiplier(False)
+    eq('回读校验失败时返回 False（不谎报成功）', changed, False)
 finally:
-    ModPrefs.write_raw = original
+    ModPrefs.write_raw = _real_write
 
 # ---------------------------------------------------------------- 3. get_state
 checker.header('3. get_state 三态判定')
@@ -427,16 +374,17 @@ eq('中间态(倍率还关着) -> 只补 1/2/3',
 eq('陌生值 777 -> 不猜，返回空', needs(_WEIRD, False), {})
 
 _p, _dev = repair_case(_MIXED, False)
-_eq_repair = _p.repair(False, restart=False)
+_eq_repair = _p.repair(False)
 check('repair 只改缺失的键并落盘', _eq_repair is True)
 _d = parse(_dev.xml)
 eq('repair 后 22 = false', _d['22'], ('boolean', 'false'))
 eq('repair 后 1 仍是 1（没被重写）', _d['1'], ('int', '1'))
 check('repair 时也停了游戏（否则写入会被覆盖）', 'app_stop' in _dev.calls, str(_dev.calls))
+check('repair 后不主动启动游戏', 'app_start' not in _dev.calls, str(_dev.calls))
 
 _p, _dev = repair_case(_ALREADY_OFF, False)
 _dev.calls.clear()
-eq('已达成目标时 repair 不做任何事', _p.repair(False, restart=False), False)
+eq('已达成目标时 repair 不做任何事', _p.repair(False), False)
 _writes = [c for c in _dev.calls if c.startswith(('app_stop', 'app_start', 'adb_push'))]
 eq('已达成目标时 repair 只读检测、不写不重启', _writes, [])
 

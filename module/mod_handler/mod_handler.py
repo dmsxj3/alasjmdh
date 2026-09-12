@@ -259,11 +259,20 @@ class ModHandler(ModuleBase):
 
     def __init__(self, config=None, device=None):
         if device == 'skip':
-            # 绑定设备对象会去连模拟器，诊断配置时并不需要
-            device = None
+            # 'skip'：只做配置级诊断，绝不碰设备。
+            # 不能走 ModuleBase.__init__ —— 它在 device=None 时会自动构造 Device
+            # 去连模拟器（module/base/base.py 的固定行为），这正是 'skip' 要避免的；
+            # 之前把 device 置 None 再调 super().__init__，Device 照样被建出来。
+            # 这里手动补齐 ModuleBase 会初始化的属性
+            # （early_ocr_import 对本类是 no-op：EARLY_OCR_IMPORT=False）。
             self._device_free = True
-        else:
-            self._device_free = False
+            self.config = config
+            self.device = None
+            self.interval_timer = {}
+            self._backend_obj = None
+            self._last_want = None
+            return
+        self._device_free = False
         super().__init__(config=config, device=device)
         self.config = config
         # 注意：device=None 时 ModuleBase 已经自动按 config 建好了 Device，
@@ -405,18 +414,18 @@ class ModHandler(ModuleBase):
             return self._last_want, 'session'
         return None, 'unknown'
 
-    def repair_partial(self, mode: bool, restart=None):
+    def repair_partial(self, mode: bool):
         """
         设备只有部分键落在目标值上时，只补写缺失的那些。
 
-        后端不支持（ui）或没有可补的键时返回 False，调用方走完整流程。
+        后端不支持（ui 没有 repair）或没有可补的键时返回 False，调用方走完整流程。
 
         Returns:
             bool: 是否真的补写了
         """
         try:
-            result = self._backend.repair(mode, restart=restart)
-        except TypeError:
+            result = self._backend.repair(mode)
+        except AttributeError:
             return False
         except Exception as e:
             logger.warning(f'ModHandler: repair_partial failed: {e}')
@@ -425,23 +434,18 @@ class ModHandler(ModuleBase):
             logger.attr('ModHandler', f'repaired to {"ON" if mode else "OFF"}')
         return bool(result)
 
-    def set_multiplier(self, mode: bool, restart=None):
+    def set_multiplier(self, mode: bool):
         """
         按配置的后端切换倍率。
-        overlay 后端（默认）直接点悬浮窗开关，native 改内存立即生效，不重启游戏；
-        restart 参数仅为 prefs 后端保留。
+        overlay 后端（默认）点悬浮窗开关直接写入，立即生效；
+        prefs 后端写 XML，需要停游戏，写完游戏保持关闭、由 ALAS 拉起。
 
         Args:
             mode: True = 开倍率，False = 关倍率
-            restart: 仅 prefs 后端有意义
         Returns:
-            bool: 后端是否真的做了改动（没配 key、或已是目标状态时为 False）
+            bool: 后端是否确认达成目标状态（没配 key、已是目标状态或校验失败时为 False）
         """
-        try:
-            result = self._backend.set_multiplier(mode, restart=restart)
-        except TypeError:
-            # 老签名（或第三方后端）不接受 restart 参数
-            result = self._backend.set_multiplier(mode)
+        result = self._backend.set_multiplier(mode)
         if result:
             logger.attr('ModHandler', f'multiplier {"ON" if mode else "OFF"}')
         return bool(result)

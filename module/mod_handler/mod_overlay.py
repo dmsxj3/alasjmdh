@@ -598,7 +598,7 @@ class ModOverlay(ModuleBase):
             logger.warning(f'ModOverlay: screenshot failed: {e}')
             return None
         int_keys = sorted(k for k, v in target.items() if not isinstance(v, bool))
-        bool_keys = [k for k in target.items() if isinstance(v, bool)]
+        bool_keys = [k for k, v in target.items() if isinstance(v, bool)]
         result = {}
         try:
             got = self._read_slider_values(image, frame, int_keys)
@@ -637,6 +637,16 @@ class ModOverlay(ModuleBase):
         return result or None
 
     # ------------------------------------------------------------ 清场
+    def _stop_requested(self):
+        """
+        GUI 触发「更新 / 重启」时会 set 一个 Event，process_manager 把它注入到
+        AzurLaneConfig.stop_event（类属性，调度进程内全局可见）。
+        这时没必要再等悬浮窗自灭，尽快把控制权还给调度循环让它退出。
+        直接跑 `python alas.py`（不经过 GUI）时该值为 None，视为没有停止请求。
+        """
+        event = getattr(self.config, 'stop_event', None)
+        return event is not None and event.is_set()
+
     def wait_gone(self, extra=8, cap=180):
         """
         等悬浮窗被 mod 自己杀死（removeView）后再返回，避免面板留在屏幕上干扰
@@ -646,13 +656,20 @@ class ModOverlay(ModuleBase):
         窗口状态（隐藏图标还可能被 Alas 或别的任务误触/重新弹出），无法预期。
         面板的存活计时是「每次触摸后重新计 -98 秒」，所以这里按设备真实 -98 轮询，
         一消失就立刻返回。
+
+        轮询间隔取 1s：单次 `dumpsys window windows` 本身就要几百 ms，
+        更密的轮询只会徒增 adb 负担。等待中途收到 GUI 的停止请求（更新/重启）
+        时立即让出，不再把调度循环拖住最坏 survival+extra 秒。
         """
         deadline = time.time() + min(cap, self.survival_seconds + extra)
         while time.time() < deadline:
+            if self._stop_requested():
+                logger.info('ModOverlay: wait_gone interrupted by stop event')
+                return False
             if not self.overlay_frame():
                 logger.attr('ModOverlay', 'overlay gone, screen clean')
                 return True
-            time.sleep(0.5)
+            time.sleep(1.0)
         if self.overlay_frame():
             logger.warning('ModOverlay: 悬浮窗仍未消失（超过 %ss），后续识图可能受干扰'
                            % int(min(cap, self.survival_seconds + extra)))
@@ -660,13 +677,12 @@ class ModOverlay(ModuleBase):
         return True
 
     # ------------------------------------------------------------ 主入口
-    def set_multiplier(self, mode: bool, restart=None):
+    def set_multiplier(self, mode: bool):
         """
         把倍率切到目标状态，全程不重启游戏。
 
         Args:
             mode: True = 开倍率（OnKeys），False = 关倍率（OffKeys）
-            restart: 兼容签名，overlay 后端不使用
         Returns:
             bool: 是否确认达成目标状态
         """
@@ -819,7 +835,7 @@ class ModOverlay(ModuleBase):
             f'进程不在时 startservice 会新起进程，Launcher.onCreate -> new Menu -> Menu.Icon() '
             f'抛 UnsatisfiedLinkError，整个游戏进程崩溃。')
 
-    def repair(self, mode: bool, restart=None):
+    def repair(self, mode: bool):
         """
         overlay 后端没有「部分匹配」概念：要么整组键一起改，要么不动。
         这里恒返回 False，让 ModHandler 走完整流程（含敏感任务日志与校验）。

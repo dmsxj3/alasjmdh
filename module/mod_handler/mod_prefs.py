@@ -15,11 +15,13 @@ ModPrefs — 通过 root 直接读写改版客户端悬浮窗的 SharedPreferenc
     所以点不到、也读不到它的控件；部分版本悬浮窗还会在数秒后自动消失。
     结论：prefs 是唯一可行的控制通道。
   - 应用对 prefs 有内存缓存，运行中改文件既可能不生效、又会在应用退出时被覆盖回去。
-    因此写入前必须先停游戏；要不要马上拉起来由 ModHandler.RestartTask 决定。
+    因此写入前必须先停游戏；写完不主动拉起，游戏保持关闭，
+    ALAS 下一步截图会收到 GameNotRunningError 并自动排一个 Restart 任务把它拉起来。
 
 注意事项：
   - 修改前必须停掉游戏进程，否则应用内存中的副本会在退出时覆盖我们的写入。
-  - 写完会回读一次校验（verify_applied），避免"以为关了其实没关"。
+  - 写完会回读一次校验（verify_applied），回读不一致按失败处理 ——
+    避免"以为关了其实没关"。
   - key 映射通过 ModHandler.OffKeys / OnKeys 配置；用 dev_tools/mod_discover.py 自动发现。
 """
 import os
@@ -259,22 +261,6 @@ class ModPrefs(ModuleBase):
         from module.mod_handler.mod_handler import parse_key_values
         return parse_key_values(
             deep_get(self.config.data, 'ModHandler.ModHandler.OnKeys', default=''))
-
-    @property
-    def restart_policy(self):
-        """
-        什么时候立刻重启游戏（游戏本来就没跑时不重启）。
-
-        always         : 只要改了配置就立刻重启（默认）
-        sensitive_only : 只有敏感任务（演习 / META / 共斗）关倍率时立刻重启；
-                         其他任务写完把游戏留在停止状态 ——
-                         ALAS 会把 GameNotRunningError 转成 Restart 任务
-                         （alas.py 的 run(): self.config.task_call('Restart')），
-                         所以游戏会被自己拉起来。
-        never          : 只停游戏、写配置，启动完全交给 ALAS。
-        """
-        return str(deep_get(self.config.data, 'ModHandler.ModHandler.RestartTask',
-                            default='always') or 'always')
 
     @property
     def remote_path(self):
@@ -554,18 +540,18 @@ class ModPrefs(ModuleBase):
             return todo
         return {}
 
-    def set_multiplier(self, mode: bool, restart=None):
+    def set_multiplier(self, mode: bool):
         """
         按策略把悬浮窗的倍率类开关写到目标值。
 
+        流程：停游戏（若在跑）-> 写 XML -> 游戏保持关闭（ALAS 需要时会自己拉起）
+        -> 回读校验。
+
         Args:
             mode: True = 启用倍率（恢复正常），False = 关闭倍率
-            restart: 写完之后要不要立刻把游戏拉起来
-                     None  -> 按 ModHandler.RestartTask 的策略判断
-                     True  -> 立刻重启（敏感任务，等同 AlasGG 的 gg_reset）
-                     False -> 只停游戏、写入，由 ALAS 自己决定何时启动
         Returns:
-            bool: 是否真的改写了配置
+            bool: 回读校验确认达成目标状态时为 True；
+                  已是目标状态、或校验未通过时为 False；写入失败时抛异常。
         """
         changes = self.on_keys if mode else self.off_keys
         if not changes:
@@ -593,55 +579,28 @@ class ModPrefs(ModuleBase):
             logger.info(f'ModPrefs: already at target state ({changes}), skip')
             return False
 
-        if restart is None:
-            restart = self.restart_policy == 'always'
+        logger.info(f'ModPrefs: applying {todo} -> {"ON" if mode else "OFF"}')
 
-        no_stop = restart == 'no_stop'
-        logger.info(f'ModPrefs: applying {todo} -> {"ON" if mode else "OFF"} '
-                    f'(restart={restart})')
-        if no_stop:
-            logger.warning('ModPrefs: RestartTask=never —— 不停游戏直接改文件。'
-                           '游戏运行中读的是内存副本，这次改动多半不生效，'
-                           '而且会在游戏退出时被覆盖回去。'
-                           '想要倍率真正变化必须让游戏重新加载配置（即重启）。')
-
-        # 必须停游戏：应用内存里的副本会在退出时把我们的写入覆盖回去
+        # 必须停游戏：应用内存里的副本会在退出时把我们的写入覆盖回去。
+        # 写完不主动拉起：ALAS 下一次截图发现游戏没跑（GameNotRunningError），
+        # 会自动排一个 Restart 任务把它拉起来，顺带完成登录等待。
         was_running = self._is_game_running()
-        if was_running and not no_stop:
+        if was_running:
             logger.info('ModPrefs: stopping game, otherwise the running instance '
                         'overwrites our write when it exits')
             self._app_stop()
 
-        failed = False
-        try:
-            self.write_raw(self.build_xml(current, todo))
-        except Exception:
-            failed = True
-            raise
-        finally:
-            if no_stop:
-                pass
-            elif was_running and restart:
-                logger.info('ModPrefs: restarting game so the mod re-reads prefs')
-                try:
-                    self._app_start()
-                except Exception as e:
-                    # 起不来也要把话说清楚，否则下一个任务会对着黑屏操作
-                    logger.error(f'ModPrefs: 重启游戏失败({e})，请检查 ALAS 的 Error.HandleError 配置')
-                    if not failed:
-                        raise
-            elif was_running and not failed:
-                # 游戏保持关闭状态，让 ALAS 自己在需要时启动：
-                # 这样比"运行中改文件"安全 —— 否则应用退出时会把改动覆盖回去。
-                logger.info('ModPrefs: game left stopped on purpose, '
-                            'ALAS will start it when the next task needs it')
+        self.write_raw(self.build_xml(current, todo))
 
-        if failed:
-            return True
-        self.verify_applied(mode)
+        # 改配置文件这件事本身不会报错，所以必须回读验证；
+        # 回读不一致 / 读不到明确状态都按失败处理，调用方会如实上报，
+        # 不会带着"以为关了其实没关"的状态继续跑（封号风险的来源）。
+        if not self.verify_applied(mode):
+            logger.error('ModPrefs: 回读校验未确认生效，按失败处理')
+            return False
         return True
 
-    def repair(self, mode: bool, restart=None):
+    def repair(self, mode: bool):
         """
         只补写缺失的键（不改动已经正确的键）。
 
@@ -649,7 +608,7 @@ class ModPrefs(ModuleBase):
         这里只写"差一点"的那几个，代价更小，但同样需要停游戏才能落盘。
 
         Returns:
-            bool: 是否真的写入了
+            bool: 回读校验确认补写生效时为 True；无需补写或校验未通过时为 False。
         """
         todo = self.needs_repair(mode)
         if not todo:
@@ -662,41 +621,19 @@ class ModPrefs(ModuleBase):
         if current is None:
             raise RuntimeError(f'无法读取 {self.remote_path}，请确认包名/PrefsFile 是否正确。')
 
-        if restart is None:
-            restart = self.restart_policy == 'always'
-        no_stop = restart == 'no_stop'
-        logger.info(f'ModPrefs: repairing {todo} -> {"ON" if mode else "OFF"} '
-                    f'(restart={restart})')
-        if no_stop:
-            logger.warning('ModPrefs: RestartTask=never —— 不停游戏直接改文件，'
-                           '这次改动多半不生效（见 set_multiplier 的说明）')
+        logger.info(f'ModPrefs: repairing {todo} -> {"ON" if mode else "OFF"}')
 
         was_running = self._is_game_running()
-        if was_running and not no_stop:
+        if was_running:
             logger.info('ModPrefs: stopping game, otherwise the running instance '
                         'overwrites our write when it exits')
             self._app_stop()
-        failed = False
-        try:
-            self.write_raw(self.build_xml(current, todo))
-        except Exception:
-            failed = True
-            raise
-        finally:
-            if no_stop:
-                pass
-            elif was_running and restart:
-                try:
-                    self._app_start()
-                except Exception as e:
-                    logger.error(f'ModPrefs: 重启游戏失败({e})，请检查 ALAS 的 Error.HandleError 配置')
-                    if not failed:
-                        raise
-            elif was_running and not failed:
-                logger.info('ModPrefs: game left stopped on purpose, '
-                            'ALAS will start it when the next task needs it')
-        if not failed:
-            self.verify_applied(mode)
+
+        self.write_raw(self.build_xml(current, todo))
+
+        if not self.verify_applied(mode):
+            logger.error('ModPrefs: 回读校验未确认生效，按失败处理')
+            return False
         return True
 
     def verify_applied(self, mode: bool):
@@ -743,44 +680,6 @@ class ModPrefs(ModuleBase):
         except RequestHumanTakeover as e:
             logger.warning(f'ModPrefs: device.app_stop 不可用({e})，改用 am force-stop')
             self.device.adb_shell(['am', 'force-stop', self.package], timeout=15)
-
-    def _app_start(self):
-        """
-        启动游戏，并等待登录完成。
-
-        关键：不能只调 device.app_start() —— 那只是把 App 拉起来，
-        不等登录。ALAS 紧接着接管时会对着加载界面截图，刷一堆
-        "Unknown ui page" 然后 "Game page unknown" 直接崩掉。
-        所以这里补上 ALAS 自己的登录处理 LoginHandler.handle_app_login()。
-
-        注意不用 alas.py 的 restart()/LoginHandler.app_restart()：
-        那个里面有 config.task_delay(server_update=True)，会把当前任务推迟到
-        下一次服务器刷新（可能几小时后）。我们要的是「原地重启后继续跑当前任务」。
-        """
-        try:
-            self.device.app_start()
-        except RequestHumanTakeover as e:
-            logger.warning(f'ModPrefs: device.app_start 不可用({e})，改用 monkey 启动')
-            self.device.adb_shell(
-                ['monkey', '-p', self.package, '-c', 'android.intent.category.LAUNCHER', '1'],
-                timeout=30)
-            return
-
-        # device.config 由 alas.py 在每个任务前赋值（self.device.config = self.config）。
-        # 有它说明是 ALAS 主进程里的真实设备，可以走登录流程；
-        # 没有则退化为只启动（例如测试环境）。
-        if getattr(self.device, 'config', None) is None:
-            logger.info('ModPrefs: device has no config bound, skip login handling')
-            return
-        try:
-            from module.handler.login import LoginHandler
-
-            logger.info('ModPrefs: waiting for game login so Alas can continue safely')
-            LoginHandler(self.device.config, device=self.device).handle_app_login()
-        except Exception as e:
-            # 登录失败不能把整个任务链打断：交给 ALAS 的错误处理去重启
-            logger.error(f'ModPrefs: 登录等待失败({type(e).__name__}: {e})，'
-                         f'Alas 会在需要时自行重启游戏')
 
     def _match(self, parsed, target):
         """parsed 是否完全等于 target（键与值都对上）。"""
