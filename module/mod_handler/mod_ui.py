@@ -111,8 +111,16 @@ class ModUi(ModuleBase):
         det = connection if connection is not None else self._d
         if det is None:
             return None
-        det.wait_timeout = float(
-            deep_get(self.config.data, 'ModHandler.ModHandler.UiWaitTimeout', default=5) or 5)
+        # 容错解析（与 overlay.survival_seconds 的 _safe_int 对齐，第五轮 F5-3）：
+        # UiWaitTimeout 是 type=input 且无 validate，GUI 可存任意文本；float()
+        # 直接消费会 ValueError -> ModUi 整条链路挂掉 -> 敏感任务停机。
+        raw = deep_get(self.config.data, 'ModHandler.ModHandler.UiWaitTimeout', default=5)
+        try:
+            det.wait_timeout = float(raw or 5)
+        except (TypeError, ValueError):
+            logger.warning(f'ModUi: UiWaitTimeout={raw!r} 不是数字，回退 5s')
+            det.wait_timeout = 5.0
+        return det.wait_timeout
         return det.wait_timeout
 
     def _find_switch(self, label):

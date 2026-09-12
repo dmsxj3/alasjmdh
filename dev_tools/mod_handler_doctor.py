@@ -214,6 +214,12 @@ def main():
     print(f'\n[3] 游戏包与 prefs 文件')
     pkgpath = adb.shell(f'pm path {package}').strip()
     print(f'  package       : {package}')
+    # Adb.raw 失败时返回 '__ERROR__ ...'（非空）——不检查哨兵的话会被下面的
+    # `if not pkgpath` 当成"已安装"，把后续失败归因引向 prefs/客户端（F5-2）。
+    if pkgpath.startswith('__ERROR__'):
+        print(f'  pm path       : {pkgpath}')
+        print('  [!] pm 命令失败（adb 连接/设备异常），无法确认安装状态 —— 先解决 adb 连接再继续')
+        return 1
     print(f'  pm path       : {pkgpath or "(未安装)"}')
     if not pkgpath:
         print('  [!] 该包名未安装，请检查 ModHandler.PackageName')
@@ -274,12 +280,15 @@ def main():
         data_cfg.setdefault('ModHandler', {}).setdefault('ModHandler', {})
         data_cfg['ModHandler']['ModHandler']['OffKeys'] = new_off
         data_cfg['ModHandler']['ModHandler']['OnKeys'] = new_on
-        with open(path, 'w', encoding='utf-8') as f:
-            json.dump(data_cfg, f, ensure_ascii=False, indent=2)
+        # 原子写（复用 ALAS 自己的 write_file，带 default=str），避免 open('w')
+        # 中断时把实例配置截断 —— 配置文件废了 ALAS 会直接读不了（F5-1）。
+        from module.config.utils import write_file
+        write_file(f'{name}.json', data_cfg)
         print(f'\n  [+] 已写入 {path}')
         print(f'      OffKeys = {new_off}')
         print(f'      OnKeys  = {new_on}')
-        print('      （若 ALAS 正在运行，需要重启才读到新配置）')
+        print('      ⚠️ 先停掉 ALAS 再跑 --apply：ALAS 运行中时，内存里的旧配置会在'
+              '下一个任务边界被整体写回，本次改动会被覆盖丢失（不是"重启才读到"）。')
 
     # ---------------------------------------------------------- 5. key 校验
     print('\n[5] OffKeys / OnKeys 校验')

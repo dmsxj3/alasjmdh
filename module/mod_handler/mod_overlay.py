@@ -397,16 +397,20 @@ class ModOverlay(ModuleBase):
                 return x0, y0, x1 - x0, y1 - y0
         return None
 
-    def overlay_frame(self):
+    def overlay_frame(self, timeout=15):
         """
         取悬浮窗矩形 (x0, y0, w, h)，取不到返回 None。
 
         判据：同一窗口块里同时出现 APPLICATION_OVERLAY 与 gr=TOP*（悬浮窗是 TOP|LEFT|CENTER
         对齐；mod 的 AlertDialog 是 gr=CENTER，靠这个区分），且窗口头包含游戏包名。
         APPLICATION_OVERLAY 只由带 overlay 权限的窗口使用，不会误伤普通 Activity。
+
+        timeout：dumpsys 的子进程超时。曾为 40s —— 等待循环每轮探测都吃这个上限，
+        adb 不响应时 show() 的长尾全来自它；正常设备 dumpsys <1s，15s 已有 15 倍
+        冗余（第五轮审查 V-3）。
         """
         try:
-            out = str(self.device.adb_shell(['dumpsys', 'window', 'windows'], timeout=40) or '')
+            out = str(self.device.adb_shell(['dumpsys', 'window', 'windows'], timeout=timeout) or '')
         except Exception as e:
             logger.warning(f'ModOverlay: dumpsys window failed: {e}')
             return None
@@ -420,7 +424,7 @@ class ModOverlay(ModuleBase):
 
     def _is_foreground(self):
         try:
-            out = str(self.device.adb_shell(['dumpsys', 'window'], timeout=30) or '')
+            out = str(self.device.adb_shell(['dumpsys', 'window'], timeout=15) or '')
             m = re.search(r'mCurrentFocus=Window\{[^}]*\s([\w.]+/[\w.$]+)\}', out)
             return bool(m) and m.group(1).startswith(self.package)
         except Exception:
@@ -539,11 +543,14 @@ class ModOverlay(ModuleBase):
         #    println），失败信息是其后的 `Error: ...` 行。所以单一标记不可靠，
         #    必须用组合判据（见下方 _start_ok）：打了前缀 且 没有 Error 行才算
         #    受理成功。
-        #    ⏱ 真实上界（第四轮审查 V-3）：本段最坏 ≈20s（su stop 5s + sleep 1s
-        #    + su start 5s + 普通兜底 5s，connect 内部还嵌套两次各 ≤5s 的
-        #    devices 查询）——只在 adb 本身不响应时出现；正常路径第一候选命中
-        #    在线列表就零开销返回。不做进一步收紧：过度收敛会把简单的顺序调用
-        #    改成需要传递 deadline 的复杂签名，收益不成比例。
+        #    ⏱ 长尾上界（第五轮审查 V-3，按真实调用清单重算）：本段的 adb 调用
+        #    都没传显式 timeout，吃 ALAS 默认 10s（module/device/connection.py）：
+        #    su stop(10) + sleep 1 + su start(10) + 普通兜底(10)；更长的其实是
+        #    dumpsys —— 开头的 overlay_frame() 与 _is_foreground() 各 15s（本轮
+        #    已从 40s/30s 降下来），等待循环每轮探测也是 15s/轮。adb 完全不响应
+        #    时 show() 上界仍可达分钟级，但正常路径 1~4s（探测命中即返回）。
+        #    若还要压长尾，抓手是把 overlay_frame 的 dumpsys timeout 再降，而不是
+        #    动 su 那三次。
         out_stop = ''
         try:
             out_stop = str(self.device.adb_shell(f'su -c "am stopservice -n {target}"') or '')
