@@ -12,6 +12,7 @@ prefs 走 testkit 的 FakeDevice 假 adb。真机相关的验证仍用 dev_tools
 """
 import os
 import sys
+import time
 
 import numpy as np
 
@@ -66,6 +67,18 @@ def make_overlay(**values):
     cfg = FakeConfig(**values)
     dev = OverlayDevice()
     return ModOverlay(config=cfg, device=dev), cfg, dev
+
+
+def set_device_xml(overlay, xml):
+    """
+    改「设备上」的 prefs 内容，并让 overlay 的快照缓存失效。
+
+    真实场景里 XML 是 mod 自己（或用户手动）改的，overlay 无从得知；测试里
+    改了设备内容就必须显式失效，否则会读到改之前的快照。overlay 自身在
+    点击/写盘之后都会自动失效，这里模拟的是「设备在背后变了」。
+    """
+    overlay.device.xml = xml
+    overlay._invalidate_prefs()
 
 
 def image_with_dot(x, y, size=14, color=TEAL):
@@ -139,7 +152,7 @@ checker.header('3. get_state 三态（读 prefs）')
 def state_with(xml):
     o2, _, _ = make_overlay()
     o2._prefs = None
-    o2.device.xml = xml
+    set_device_xml(o2, xml)
     return o2.get_state()
 
 
@@ -150,9 +163,9 @@ eq('读不到 XML -> None', state_with(''), None)
 
 # 部分键的配置：只有 1 和 3，必须两个都对上才算开
 o3, _, _ = make_overlay(OffKeys='1=1,3=1', OnKeys='1=1000,3=1000')
-o3.device.xml = xml_of(**{'1': 1000, '2': 1, '3': 1000})
+set_device_xml(o3, xml_of(**{'1': 1000, '2': 1, '3': 1000}))
 eq('部分键配置下两个键都对上 -> True', o3.get_state(), True)
-o3.device.xml = xml_of(**{'1': 1000, '2': 1, '3': 1})
+set_device_xml(o3, xml_of(**{'1': 1000, '2': 1, '3': 1}))
 eq('部分键配置下只对上一个是 -> None', o3.get_state(), None)
 
 # ---------------------------------------------------------------- 4. 窗口矩形解析
@@ -258,7 +271,7 @@ check('_disabled 是类属性：新建实例仍然停用（旧实现这里会回
 check('_disabled 定义在类上，不在实例字典里', '_disabled' not in a.__dict__)
 
 # 停用后不得再碰悬浮窗：fallback 关 -> 只报失败
-b.device.xml = xml_of(**{'1': 1000, '2': 1000, '3': 1000})
+set_device_xml(b, xml_of(**{'1': 1000, '2': 1000, '3': 1000}))
 b.config.data['ModHandler']['ModHandler']['OverlayFallbackPrefs'] = False
 dev_b.calls.clear()
 eq('停用 + 关闭降级 -> 返回 False', b.set_multiplier(False), False)
@@ -284,13 +297,13 @@ class StubPrefs:
 
 
 o7, cfg7, dev7 = make_overlay()
-dev7.xml = xml_of(**{'1': 1, '2': 1, '3': 1})      # 设备上已经是关
+set_device_xml(o7, xml_of(**{'1': 1, '2': 1, '3': 1}))   # 设备上已经是关
 dev7.calls.clear()
 eq('已是目标状态 -> True（不动作）', o7.set_multiplier(False), True)
 eq('已是目标状态时不碰设备', [c for c in dev7.calls if 'startservice' in c], [])
 
 o8, cfg8, dev8 = make_overlay()
-dev8.xml = xml_of(**{'1': 1000, '2': 1000, '3': 1000})
+set_device_xml(o8, xml_of(**{'1': 1000, '2': 1000, '3': 1000}))
 o8._prefs = StubPrefs(result=True)
 o8._disabled = True                                # 强制走降级分支
 eq('停用 + 开启降级 -> 走 prefs 并返回其结果', o8.set_multiplier(False), True)
@@ -299,7 +312,7 @@ eq('降级时把 mode 透传给 ModPrefs', o8._prefs.calls, [False])
 # 真实降级链路（不替换 prefs_reader）：停用 overlay + 开启降级 -> 真写 prefs
 o9, cfg9, dev9 = make_overlay(OverlayFallbackPrefs=True)
 o9._disabled = True                                # 跳过悬浮窗尝试，直接验证降级
-dev9.xml = xml_of(**{'1': 1000, '2': 1000, '3': 1000})
+set_device_xml(o9, xml_of(**{'1': 1000, '2': 1000, '3': 1000}))
 dev9.running = True
 dev9.calls.clear()
 eq('真实降级链路（overlay 失败 -> prefs 写盘）', o9.set_multiplier(False), True)
@@ -309,7 +322,7 @@ check('降级链路确实停了游戏并推送了新 XML',
 
 o10, cfg10, dev10 = make_overlay()
 eq('repair 恒为 False（overlay 没有部分匹配概念）', o10.repair(False), False)
-dev10.xml = xml_of(**{'1': 1, '2': 1, '3': 1})
+set_device_xml(o10, xml_of(**{'1': 1, '2': 1, '3': 1}))
 check('verify_applied 与 get_state 一致', o10.verify_applied(False) is True)
 check('verify_applied 目标不符时为 False', o10.verify_applied(True) is False)
 
@@ -338,18 +351,69 @@ eq('窗口出现 -> show() 返回 True', o15.show(timeout=2), True)
 checker.header('8. 配置读取与边界')
 o11, cfg11, dev11 = make_overlay(OverlayService='com.x.Y', OverlaySurvivalSeconds=45)
 eq('service 读配置', o11.service, 'com.x.Y')
-dev11.xml = None
+set_device_xml(o11, None)
 eq('读不到 -98 时回退配置值', o11.survival_seconds, 45)
-dev11.xml = xml_of(**{'-98': 7})
+set_device_xml(o11, xml_of(**{'-98': 7}))
 eq('-98 可读时以设备为准', o11.survival_seconds, 7)
-dev11.xml = xml_of(**{'-98': 9999})
+set_device_xml(o11, xml_of(**{'-98': 9999}))
 eq('存活秒数上限 120', o11.survival_seconds, 120)
-dev11.xml = xml_of(**{'-98': 1})
+set_device_xml(o11, xml_of(**{'-98': 1}))
 eq('存活秒数下限 5', o11.survival_seconds, 5)
 
 o12, cfg12, dev12 = make_overlay(OnKeys='', OffKeys='')
 eq('OnKeys/OffKeys 都空 -> set_multiplier 返回 False', o12.set_multiplier(True), False)
 eq('都空时 describe_state = unconfigured', o12.describe_state()['option'], 'unconfigured')
 eq('都空时 get_state = None', o12.get_state(), None)
+
+# ---------------------------------------------------------------- 9. prefs 读取缓存
+checker.header('9. _prefs_raw 缓存（一次操作里不做重复 adb 往返）')
+oc, cfgc, devc = make_overlay()
+set_device_xml(oc, xml_of(**{'1': 1, '2': 1, '3': 1}))
+devc.calls.clear()
+oc._prefs_raw()
+oc._prefs_raw()
+oc.get_state()
+n_cat = len([c for c in devc.calls if 'cat ' in c])
+eq('TTL 内的多次读取只做一次 adb 往返', n_cat, 1)
+
+oc._invalidate_prefs()
+oc._prefs_raw()
+n_cat = len([c for c in devc.calls if 'cat ' in c])
+eq('失效后重新读设备', n_cat, 2)
+
+devc.calls.clear()
+oc._prefs_raw(refresh=True)
+n_cat = len([c for c in devc.calls if 'cat ' in c])
+eq('refresh=True 绕过缓存', n_cat, 1)
+
+# 缓存必须真的返回同一份快照：设备在背后变了也还是旧值（这正是缓存的语义，
+# 所以写盘/点击之后一定要 _invalidate_prefs）
+oc2, cfg2, dev2 = make_overlay()
+set_device_xml(oc2, xml_of(**{'1': 1, '2': 1, '3': 1}))
+eq('缓存命中时读到的是旧快照', oc2.get_state(), False)
+dev2.xml = xml_of(**{'1': 1000, '2': 1000, '3': 1000})
+eq('未失效时仍读旧快照', oc2.get_state(), False)
+oc2._invalidate_prefs()
+eq('失效后读到新值', oc2.get_state(), True)
+
+# ---------------------------------------------------------------- 10. wait_gone 总预算
+checker.header('10. wait_gone 的整次操作总预算')
+ow, cfgw, devw = make_overlay()
+devw.windows_dump = DUMP                      # 面板一直在 -> 正常情况下会一直等
+ow.overlay_frame = lambda: True               # 直接钉死「面板还在」
+ow._wait_gone_deadline = time.time() + 0.05
+_t0 = time.time()
+eq('预算用完时 wait_gone 立即返回 False', ow.wait_gone(extra=60, cap=180), False)
+check('预算用完时没有真的等满 survival+extra', time.time() - _t0 < 5,
+      f'elapsed={time.time() - _t0:.2f}s')
+
+ow2, cfgw2, devw2 = make_overlay()
+ow2.overlay_frame = lambda: False
+ow2._wait_gone_deadline = time.time() + 0.05
+eq('面板已消失时预算不影响正常返回 True', ow2.wait_gone(extra=60, cap=180), True)
+
+check('总预算是个有限的秒数（否则重试路径会累积成十几分钟阻塞）',
+      isinstance(ModOverlay.WAIT_GONE_BUDGET, int) and ModOverlay.WAIT_GONE_BUDGET <= 60,
+      f'WAIT_GONE_BUDGET={ModOverlay.WAIT_GONE_BUDGET}')
 
 sys.exit(checker.summary())

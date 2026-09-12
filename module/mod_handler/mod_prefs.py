@@ -30,7 +30,6 @@ import tempfile
 from xml.etree import ElementTree
 
 from module.config.deep import deep_get
-from module.exception import RequestHumanTakeover
 from module.logger import logger
 
 
@@ -53,6 +52,9 @@ except ImportError:  # pragma: no cover - 取决于运行环境
     ModuleBase = _ModuleBaseStub
 
 TMP_REMOTE = '/data/local/tmp/_alas_mod_prefs.xml'
+# write_raw 的写入成功标记：adb_shell 只回 stdout，cp/chmod 失败时 stderr 不会
+# 出现在返回值里，没有这个标记就无法区分「写成功但没输出」和「根本没写进去」。
+WRITE_OK_MARK = '__ALAS_PREFS_OK__'
 DEFAULT_PACKAGE = 'com.bilibili.azurlane'
 DEFAULT_PREFS_FILE = 'com.bilibili.azurlane_preferences'
 
@@ -345,7 +347,21 @@ class ModPrefs(ModuleBase):
         return "<?xml version='1.0' encoding='utf-8' standalone='yes' ?>\n" + body + '\n'
 
     def write_raw(self, xml_text):
-        """把 XML 写回远端，并恢复属主/权限。"""
+        """
+        把 XML 写回远端，并恢复属主/权限。
+
+        为什么要显式回显一个成功标记：`adb_shell` 只返回 stdout，`cp`/`chmod`
+        失败时 stderr 不会出现在返回值里，调用方拿到一个空串完全无法区分
+        「写成功但没输出」和「根本没写进去」。这里在关键链末尾 echo 一个标记，
+        标记缺席即判定写入失败。
+
+        `restorecon`（SELinux 上下文）与临时文件清理用 `;` 串在标记之后：
+        restorecon 在部分设备上不存在，不该因为它把「已经写进去了」判成失败。
+        真正的最终判据仍然是紧随其后的回读校验 verify_applied。
+
+        Returns:
+            bool: 关键写入链（cp/chown/chmod）是否成功。
+        """
         # 先取出原文件的属主与权限
         stat = str(self._su(f'stat -c "%u %g %a" {self.remote_path}')).strip()
         m = re.match(r'(\d+)\s+(\d+)\s+(\d+)', stat)
@@ -357,15 +373,20 @@ class ModPrefs(ModuleBase):
             with open(local, 'w', encoding='utf-8') as f:
                 f.write(xml_text)
             self.device.adb_push(local, TMP_REMOTE)
-            cmds = [f'cp {TMP_REMOTE} {self.remote_path}']
+            essential = [f'cp {TMP_REMOTE} {self.remote_path}']
             if uid:
-                cmds.append(f'chown {uid}:{gid} {self.remote_path}')
-            cmds.append(f'chmod {mode} {self.remote_path}')
-            cmds.append('restorecon ' + self.remote_path)
-            cmds.append(f'rm -f {TMP_REMOTE}')
-            out = self._su(' && '.join(cmds[:-1]) + ' ; ' + cmds[-1])
+                essential.append(f'chown {uid}:{gid} {self.remote_path}')
+            essential.append(f'chmod {mode} {self.remote_path}')
+            # 关键链成功才 echo 标记；后面的 restorecon / rm 失败不影响判定
+            cmd = (f'{" && ".join(essential)} && echo {WRITE_OK_MARK} ; '
+                   f'restorecon {self.remote_path} ; rm -f {TMP_REMOTE}')
+            out = str(self._su(cmd))
+            if WRITE_OK_MARK not in out:
+                logger.error(f'ModPrefs: 写入 {self.remote_path} 失败'
+                             f'（uid={uid} mode={mode}）：{out.strip()!r}')
+                return False
             logger.info(f'ModPrefs: wrote {self.remote_path} (uid={uid} mode={mode})')
-            return out
+            return True
         finally:
             try:
                 os.remove(local)
@@ -432,7 +453,8 @@ class ModPrefs(ModuleBase):
             mode: True = 启用倍率（恢复正常），False = 关闭倍率
         Returns:
             bool: 已是目标状态（视为已达成）或回读校验确认生效时为 True；
-                  校验未通过时为 False；写入失败时抛异常。
+                  写入失败 / 校验未通过时为 False（调用方据此走「关失败」判定）；
+                  无法安全操作（无 root、读不到文件、HandleError 关闭）时抛异常。
         """
         changes = self.on_keys if mode else self.off_keys
         if not changes:
@@ -467,13 +489,13 @@ class ModPrefs(ModuleBase):
         # 必须停游戏：应用内存里的副本会在退出时把我们的写入覆盖回去。
         # 写完不主动拉起：ALAS 下一次截图发现游戏没跑（GameNotRunningError），
         # 会自动排一个 Restart 任务把它拉起来，顺带完成登录等待。
-        was_running = self._is_game_running()
-        if was_running:
-            logger.info('ModPrefs: stopping game, otherwise the running instance '
-                        'overwrites our write when it exits')
-            self._app_stop()
+        self._stop_game()
 
-        self.write_raw(self.build_xml(current, todo))
+        if not self.write_raw(self.build_xml(current, todo)):
+            # 写不进去就直接失败：下面的回读校验虽然也能发现，但这里能给出
+            # 更明确的「写入命令链失败」而不是含糊的「回读不一致」。
+            logger.error('ModPrefs: 写入 prefs 失败，按失败处理')
+            return False
 
         # 改配置文件这件事本身不会报错，所以必须回读验证；
         # 回读不一致 / 读不到明确状态都按失败处理，调用方会如实上报，
@@ -506,13 +528,11 @@ class ModPrefs(ModuleBase):
 
         logger.info(f'ModPrefs: repairing {todo} -> {"ON" if mode else "OFF"}')
 
-        was_running = self._is_game_running()
-        if was_running:
-            logger.info('ModPrefs: stopping game, otherwise the running instance '
-                        'overwrites our write when it exits')
-            self._app_stop()
+        self._stop_game()
 
-        self.write_raw(self.build_xml(current, todo))
+        if not self.write_raw(self.build_xml(current, todo)):
+            logger.error('ModPrefs: 补写 prefs 失败，按失败处理')
+            return False
 
         if not self.verify_applied(mode):
             logger.error('ModPrefs: 回读校验未确认生效，按失败处理')
@@ -550,19 +570,33 @@ class ModPrefs(ModuleBase):
         except Exception:
             return False
 
-    def _app_stop(self):
+    def _stop_game(self):
         """
-        停游戏。
+        停游戏（写 prefs 的必要前置：应用退出时会把内存副本覆盖回文件）。
 
-        Device.app_stop 在 Alas.Error.HandleError 关闭时会抛 RequestHumanTakeover，
-        但这里停游戏只是为了安全写入 prefs，不是「重启游戏」的业务语义，
-        因此这种情况下退化为直接用 adb 强停，避免把整个任务链打断。
+        ★ 不用 adb 强停来绕过 Alas.Error.HandleError=False。
+        该配置的语义是「不要动游戏的启停」，此时 Device.app_stop 与 app_start
+        都会抛 RequestHumanTakeover。如果这里改用 `am force-stop` 强停，
+        游戏是停了，但下一步没人能把它拉起来：ALAS 截图收到 GameNotRunningError
+        -> 排 Restart 任务 -> app_start 又抛 RequestHumanTakeover -> 实例 exit(1)。
+        结果是「游戏被停在后台 + 实例崩掉」，比不做还糟。
+
+        所以这种情况直接拒绝，把选择权交回用户：
+        prefs 后端与 Error.HandleError=False 本质上互斥，要么换 overlay 后端
+        （默认，零重启），要么打开 HandleError。
         """
-        try:
-            self.device.app_stop()
-        except RequestHumanTakeover as e:
-            logger.warning(f'ModPrefs: device.app_stop 不可用({e})，改用 am force-stop')
-            self.device.adb_shell(['am', 'force-stop', self.package], timeout=15)
+        if not getattr(self.config, 'Error_HandleError', True):
+            raise RuntimeError(
+                'ModPrefs 需要先停游戏才能安全写入 prefs，但 Alas.Error.HandleError '
+                '已关闭 —— 该配置下 Device.app_stop / app_start 都会抛 '
+                'RequestHumanTakeover，强停游戏后没人能把它拉起来，任务链会在下一步崩掉。'
+                '请二选一：ModHandler.Backend 改为 overlay（默认，零重启），'
+                '或打开 Alas.Error.HandleError。')
+        if not self._is_game_running():
+            return
+        logger.info('ModPrefs: stopping game, otherwise the running instance '
+                    'overwrites our write when it exits')
+        self.device.app_stop()
 
     def _match(self, parsed, target):
         """parsed 是否完全等于 target（键与值都对上）。"""

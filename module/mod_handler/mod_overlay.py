@@ -103,12 +103,26 @@ class ModOverlay(ModuleBase):
     # 重建），实例属性只活一轮；类属性才能跨任务边界保持「已停用」状态。
     _disabled = False
 
+    # _prefs_raw 的短缓存时长。一次 set_multiplier 里 prefs 会被读很多次
+    # （get_state / _pending / 回读复核 / survival_seconds），每次都是一次
+    # `su -c cat` 往返（慢的模拟器上 100~500ms）；而且两次读之间 mod 可能已经
+    # 改了值，同一次操作里读到不同快照会得出自相矛盾的结论。
+    # 缓存只在两次读之间极短时生效，写盘/点击后一律 _invalidate_prefs()。
+    PREFS_CACHE_SEC = 0.5
+
+    # 一次 set_multiplier 里 wait_gone 会被调 4~5 次（每次重试 + finally 各一次），
+    # 逐次都按 survival+extra 等满就是十几分钟的阻塞 —— 期间调度循环既不截图、
+    # 也不喂 stuck_record，从 GUI 看就是卡死。给整次操作一个总预算。
+    WAIT_GONE_BUDGET = 45
+
     def __init__(self, config=None, device=None):
         super().__init__(config=config, device=device)
         self.config = config
         self.device = device
         self._prefs = None
         self._screen = None
+        self._prefs_cache = None          # (时间戳, 解析结果)；None 表示无缓存
+        self._wait_gone_deadline = None   # 本次 set_multiplier 的等待预算截止时刻
 
     # ------------------------------------------------------------ 配置
     @property
@@ -176,14 +190,20 @@ class ModOverlay(ModuleBase):
             new, n = re.subn(r'(<int name="-98" value=")\d+(")', rf'\g<1>{int(sec)}\g<2>', raw)
             if n == 0 or new == raw:
                 return False
-            self.prefs_reader.write_raw(new)
+            if not self.prefs_reader.write_raw(new):
+                return False
+            self._invalidate_prefs()
             logger.info(f'ModOverlay: prefs -98 已设为 {int(sec)}s（下次游戏启动生效）')
             return True
         except Exception as e:
             logger.info(f'ModOverlay: 提升存活秒数跳过（{type(e).__name__}: {e}）')
             return False
 
-    def _prefs_raw(self):
+    def _invalidate_prefs(self):
+        """写盘 / 点击之后立刻失效，避免拿到改动之前的快照。"""
+        self._prefs_cache = None
+
+    def _read_prefs_uncached(self):
         try:
             raw = self.prefs_reader.read_raw()
         except Exception as e:
@@ -196,6 +216,24 @@ class ModOverlay(ModuleBase):
         except Exception as e:
             logger.warning(f'ModOverlay: parse prefs failed: {e}')
             return None
+
+    def _prefs_raw(self, refresh=False):
+        """
+        读 prefs XML 并解析，带一个极短的时间戳缓存（PREFS_CACHE_SEC）。
+
+        Args:
+            refresh: True 时绕过缓存强制重读
+        Returns:
+            dict / None: {name: (tag, value)}；读不到或解析失败时为 None
+        """
+        now = time.time()
+        if not refresh and self._prefs_cache is not None:
+            ts, parsed = self._prefs_cache
+            if now - ts < self.PREFS_CACHE_SEC:
+                return parsed
+        parsed = self._read_prefs_uncached()
+        self._prefs_cache = (now, parsed)
+        return parsed
 
     def _prefs_int(self, key):
         parsed = self._prefs_raw()
@@ -677,8 +715,25 @@ class ModOverlay(ModuleBase):
         轮询间隔取 1s：单次 `dumpsys window windows` 本身就要几百 ms，
         更密的轮询只会徒增 adb 负担。等待中途收到 GUI 的停止请求（更新/重启）
         时立即让出，不再把调度循环拖住最坏 survival+extra 秒。
+
+        等待上限除单次的 min(cap, survival+extra) 外，再叠一层「整次操作总预算」
+        （WAIT_GONE_BUDGET）：set_multiplier 的重试路径会把本方法调到 4~5 次，
+        逐次等满就是十几分钟的阻塞 —— 期间调度循环既不截图、也不喂 stuck_record，
+        从 GUI 看就是卡死。预算用完后放弃等待，并提示后续识图可能受干扰。
+
+        Returns:
+            bool: 悬浮窗是否确认已消失
         """
-        deadline = time.time() + min(cap, self.survival_seconds + extra)
+        now = time.time()
+        deadline = now + min(cap, self.survival_seconds + extra)
+        if self._wait_gone_deadline is not None:
+            deadline = min(deadline, self._wait_gone_deadline)
+        if now >= deadline:
+            if self.overlay_frame():
+                logger.warning('ModOverlay: 等待悬浮窗消失已用完本次操作的总预算'
+                               f'（{self.WAIT_GONE_BUDGET}s），不再等待，'
+                               f'后续识图可能受悬浮窗干扰')
+            return False
         while time.time() < deadline:
             if self._stop_requested():
                 logger.info('ModOverlay: wait_gone interrupted by stop event')
@@ -689,7 +744,7 @@ class ModOverlay(ModuleBase):
             time.sleep(1.0)
         if self.overlay_frame():
             logger.warning('ModOverlay: 悬浮窗仍未消失（超过 %ss），后续识图可能受干扰'
-                           % int(min(cap, self.survival_seconds + extra)))
+                           % int(deadline - now))
             return False
         return True
 
@@ -730,6 +785,9 @@ class ModOverlay(ModuleBase):
             logger.warning('ModOverlay: overlay 后端已在本进程内被停用（此前把游戏搞崩过），'
                            '直接走 prefs 降级')
         else:
+            # 整次操作的等待预算：_apply 的重试路径会多次调用 wait_gone，
+            # 逐次等满会把调度循环卡住十几分钟（见 wait_gone 的说明）。
+            self._wait_gone_deadline = time.time() + self.WAIT_GONE_BUDGET
             try:
                 ok = self._apply(target, int_keys, bool_keys, mode)
             except Exception as e:
@@ -737,9 +795,15 @@ class ModOverlay(ModuleBase):
                 ok = False
             finally:
                 self.wait_gone()
+                self._wait_gone_deadline = None
+                # 操作结束就丢掉快照：ModHandler 紧接着会再读一次设备状态
+                # （关失败时要判断「是不是还开着」），那次读必须是操作之后的。
+                self._invalidate_prefs()
 
         if ok:
-            parsed = self._prefs_raw() or {}
+            # 悬浮窗刚点完，mod 已经把新值写回 XML —— 必须绕开缓存重读，
+            # 否则复核的是点击之前的快照。
+            parsed = self._prefs_raw(refresh=True) or {}
             if not self._at_target(parsed, target, tol_int=self._tolerance(target)):
                 logger.error('ModOverlay: prefs 复核不通过，按失败处理')
                 ok = False
@@ -755,6 +819,9 @@ class ModOverlay(ModuleBase):
                     return bool(changed)
                 except Exception as e:
                     logger.error(f'ModOverlay: prefs 降级也失败: {type(e).__name__}: {e}')
+                finally:
+                    # 降级路径改了 XML，缓存必须失效
+                    self._invalidate_prefs()
             else:
                 logger.critical('ModOverlay: 未生效且已关闭降级，'
                                 '敏感任务可能带着倍率开打，请立刻检查！')
@@ -815,6 +882,8 @@ class ModOverlay(ModuleBase):
                         f'后续校验可能失败')
                 logger.info(f'ModOverlay: 键 {key} -> {want}（滑块拖到{"最大" if to_max else "最小"}）')
                 self._gesture_slider(frame, row, to_max)
+                # mod 改完值会立刻写回 XML，缓存必须失效才能读到新快照
+                self._invalidate_prefs()
                 time.sleep(0.5)
                 if not self._alive(frame):
                     logger.info('ModOverlay: 面板中途消失，重新调起后继续')
@@ -823,6 +892,7 @@ class ModOverlay(ModuleBase):
                 for key in todo_bool:
                     logger.info(f'ModOverlay: 键 {key} -> {target[key]}（点开关）')
                     self._gesture_toggle(frame)
+                    self._invalidate_prefs()
                     time.sleep(0.6)
                     if not self._alive(frame):
                         logger.info('ModOverlay: 面板中途消失，重新调起后继续')

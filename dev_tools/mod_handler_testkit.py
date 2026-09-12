@@ -183,6 +183,8 @@ class FakeDevice:
     # xml：设备上 prefs 的内容。设了就支持只读路径（cat/stat/cp），
     # 方便直接测 needs_repair / read_raw 这类不涉及停游戏逻辑的函数。
     xml = None
+    # 让包含该子串的命令失败（模拟 cp 写不进去），用于测 write_raw 的失败判定
+    fail_command = None
 
     def _su(self, inner):
         if not self.root:
@@ -190,18 +192,32 @@ class FakeDevice:
         inner = inner.strip()
         if inner == 'id':
             return 'uid=0(root) gid=0(root)'
-        if self.xml is not None:
-            if inner.startswith('cat '):
-                return self.xml
-            if inner.startswith('stat '):
-                return '10046 10046 660'
-            if inner.startswith('cp '):
-                # cp <源> <目标> ...  —— pushed 是以源路径为 key 的
-                parts = inner.split()
-                src = parts[1] if len(parts) > 1 else ''
-                self.xml = self.pushed.get(src, self.xml)
-                return ''
-        return ''
+        if inner.startswith('cat '):
+            return self.xml if self.xml is not None else ''
+        if inner.startswith('stat '):
+            return '10046 10046 660'
+        # write_raw 会一次交一整条命令链给 su，真实远端 shell 的语义是
+        # 「段内 && 串联、段间 ; 分隔、失败只中断当前段」。这里做等价的最小模拟，
+        # 否则 ModPrefs.write_raw 拿不到成功标记，会一律判成写入失败。
+        return self._run_chain(inner)
+
+    def _run_chain(self, inner):
+        output = []
+        for segment in inner.split(' ; '):
+            for cmd in segment.split(' && '):
+                cmd = cmd.strip()
+                if not cmd:
+                    continue
+                if self.fail_command and self.fail_command in cmd:
+                    break                      # 当前段后续命令不再执行
+                if cmd.startswith('echo '):
+                    output.append(cmd[len('echo '):].strip())
+                elif cmd.startswith('cp '):
+                    parts = cmd.split()
+                    src = parts[1] if len(parts) > 1 else ''
+                    self.xml = self.pushed.get(src, self.xml)
+                # chown / chmod / restorecon / rm 都是空操作
+        return '\n'.join(output)
 
 
 # ---------------------------------------------------------------- 真实任务名

@@ -120,21 +120,9 @@ class ScriptedDevice(FakeDevice):
             return self._su(inner)
         return cmd
 
-    def _su(self, inner):
-        if not self.root:
-            return 'uid=1000(u0_a46) gid=1000(u0_a46)'
-        inner = inner.strip()
-        if inner == 'id':
-            return 'uid=0(root) gid=0(root)'
-        if inner.startswith('cat '):
-            return self.xml if self.xml is not None else ''
-        if inner.startswith('stat '):
-            return '10046 10046 660'
-        if inner.startswith('cp '):
-            # cp TMP PREF && chown ... ; rm -f TMP  —— 真正的落盘发生在这里
-            self.xml = self.pushed[TMP_REMOTE]
-            return ''
-        return ''
+    # _su 直接用 testkit 里那套「段内 && 串联、段间 ; 分隔」的最小 shell 模拟：
+    # write_raw 现在靠命令链末尾的 echo 标记判定成功，自己再实现一份很容易
+    # 漏掉标记，把成功的写入误判成失败。
 
     def adb_push(self, local, remote):
         super().adb_push(local, remote)
@@ -241,14 +229,44 @@ finally:
     ModPrefs.write_raw = original
 check('写入失败后游戏保持关闭', 'app_start' not in dev.calls, str(dev.calls))
 
-# 2.9 HandleError 关闭时停游戏退化为 am force-stop
+# 2.9 HandleError 关闭时不再用 adb 强停绕过。
+# 旧实现 catch RequestHumanTakeover 后改用 `am force-stop`：游戏是停了，
+# 但 app_start 同样会抛 —— 下一步截图 GameNotRunningError -> 排 Restart
+# -> app_start 抛异常 -> 实例 exit(1)，等于「游戏被停在后台 + 实例崩掉」。
+# 现在直接拒绝并给出可操作的提示。
 p, cfg, dev = make_prefs()
-dev.raise_on_app_stop = RequestHumanTakeover('No app stop/start, because HandleError disabled')
+cfg.Error_HandleError = False
+try:
+    p.set_multiplier(False)
+    check('HandleError 关闭时拒绝强停游戏', False, '没有抛异常')
+except RuntimeError as e:
+    check('HandleError 关闭时拒绝强停游戏', 'HandleError' in str(e), str(e))
+check('HandleError 关闭时完全不碰游戏启停',
+      'app_stop' not in dev.calls and 'app_start' not in dev.calls
+      and not any('force-stop' in c for c in dev.calls), str(dev.calls))
+eq('HandleError 关闭时也没动过 prefs', parse(dev.xml)['1'], ('int', '1000'))
+
+# 2.9b 其它原因导致 app_stop 失败时如实向上抛，不掩盖
+p, cfg, dev = make_prefs()
+dev.raise_on_app_stop = RequestHumanTakeover('device busy')
+try:
+    p.set_multiplier(False)
+    check('app_stop 其它异常时向上传播', False, '没有抛异常')
+except RequestHumanTakeover:
+    check('app_stop 其它异常时向上传播', True)
+check('app_stop 失败后不启动游戏', 'app_start' not in dev.calls, str(dev.calls))
+
+# 2.9c write_raw 的失败判定：命令链没回显成功标记就按失败处理
+p, cfg, dev = make_prefs()
+dev.fail_command = 'cp /data/local/tmp/_alas_mod_prefs.xml'
 changed = p.set_multiplier(False)
-check('HandleError 关闭时仍完成关倍率', changed is True)
-check('退化为 am force-stop',
-      any('am force-stop com.bilibili.azurlane' in c for c in dev.calls), str(dev.calls))
-check('全程不主动启动游戏', 'app_start' not in dev.calls, str(dev.calls))
+eq('cp 失败时 set_multiplier 返回 False（不谎报成功）', changed, False)
+eq('cp 失败时设备上的值没变', parse(dev.xml)['1'], ('int', '1000'))
+
+p, cfg, dev = make_prefs()
+eq('write_raw 命令链成功时返回 True',
+   p.write_raw(p.build_xml(dev.xml, {'1': 1})), True)
+eq('write_raw 成功后设备上的值已更新', parse(dev.xml)['1'], ('int', '1'))
 
 # 2.10 写入后回读校验
 p, cfg, dev = make_prefs()                       # 设备上倍率开着
