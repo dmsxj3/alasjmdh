@@ -112,12 +112,14 @@ def _adb_devices_static():
     return out
 
 
-def _adb_connect_static(serial):
+def _adb_connect_static(serial, timeout=5):
     """
     设备没在线就 adb connect 一次。
 
     模拟器掉线很常见（重启模拟器 / adb server 被别的工具重启），
     不重连的话表现是"读不到状态"，很难懂。
+    timeout 默认 5s（GUI 渲染路径会用本函数，大超时会卡住页面；
+    第二轮审查 N-2：本机 4 个候选设备 × 30s 最坏 240s 同步阻塞）。
     """
     import subprocess
 
@@ -125,7 +127,7 @@ def _adb_connect_static(serial):
         return True
     try:
         result = subprocess.run([_find_adb_static(), 'connect', serial],
-                                capture_output=True, timeout=30)
+                                capture_output=True, timeout=timeout)
     except Exception as e:
         logger.warning(f'ModPrefs: adb connect {serial} 失败: {e}')
         return False
@@ -210,12 +212,21 @@ def describe_state_readonly(config, serial=None):
     remote = f'/data/data/{package}/shared_prefs/{prefs_file}.xml'
     raw = None
     tried = []
+    # 整体预算 8s（第二轮审查 N-2）：候选设备可能多达 4 个，每候选 30s+30s
+    # 的默认超时最坏 240s —— GUI 渲染线程等不起。给 connect/su 各 5s 小超时，
+    # 超出整体预算就放弃剩余候选（第一候选通常就是配置的 serial，够用）。
+    import time as _time
+    deadline = _time.time() + 8
     for candidate in _candidate_serials(data, serial):
         tried.append(candidate)
+        if _time.time() > deadline:
+            logger.warning(f'ModPrefs: 只读状态查询超出 8s 预算，剩余候选未尝试: '
+                           f'{[c for c in _candidate_serials(data, serial) if c not in tried]}')
+            break
         # 掉线时先尝试重连一次，否则会静默读不到
-        _adb_connect_static(candidate)
+        _adb_connect_static(candidate, timeout=5)
         try:
-            out = _adb_su_static(f'cat {remote}', serial=candidate)
+            out = _adb_su_static(f'cat {remote}', serial=candidate, timeout=5)
         except Exception as e:
             logger.warning(f'ModPrefs: {candidate} 读取异常: {type(e).__name__}: {e}')
             continue
@@ -293,20 +304,26 @@ class ModPrefs(ModuleBase):
         quoted = _shell_quote(cmd)
         return self.device.adb_shell(f'su -c {quoted}', timeout=timeout)
 
-    # root 状态在一次进程生命周期内不会变，做类级缓存：ModHandler/ModOverlay
-    # 每个任务边界都新建实例，实例级缓存无效；这里省掉每个边界的 su -c id
-    # 往返（实测 100~500ms/次）。失败（False）不缓存 —— root 断了恢复后要能自愈。
-    _ROOT_OK = None
+    # root 状态在一次进程生命周期内不会变，做类级缓存（按 serial 键）：
+    # ModHandler/ModOverlay 每个任务边界都新建实例，实例级缓存无效；这里省掉
+    # 每个边界的 su -c id 往返（实测 100~500ms/次）。失败（False）不缓存 ——
+    # root 断了恢复后要能自愈。按 serial 键是为了 dev_tools 遍历多设备的场景
+    # （第二轮审查 N-6：第一台的结果不该让后面几台跳过探测）。
+    _ROOT_OK = {}
 
     def check_root(self):
-        """返回 True 表示 su 可用（进程内缓存，成功后不再重复探测）。"""
-        if ModPrefs._ROOT_OK is True:
+        """返回 True 表示 su 可用（按 serial 缓存，成功后不再重复探测）。"""
+        try:
+            serial = str(getattr(self.device, 'serial', None) or 'unknown')
+        except Exception:
+            serial = 'unknown'
+        if ModPrefs._ROOT_OK.get(serial) is True:
             return True
         try:
             out = self._su('id', timeout=15)
             ok = 'uid=0' in str(out)
             if ok:
-                ModPrefs._ROOT_OK = True
+                ModPrefs._ROOT_OK[serial] = True
             else:
                 logger.warning(f'ModPrefs: root check failed: su 未返回 uid=0（{str(out)[:60]}）')
             return ok

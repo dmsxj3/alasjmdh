@@ -9,6 +9,11 @@ mod_discover — 发现改版客户端悬浮窗开关对应的 SharedPreferences
 
 用法（在项目根目录，需要有可用的 adb 与已 root 的设备）：
 
+  ⚠️ 执行时机：snapshot/set/restore 子命令会 `am force-stop` 强停游戏并直接写
+     prefs —— **不要在 Alas 或其他实例正在跑任务时执行**，会打断它们（这层
+     干预绕过了 Error.HandleError=False 的互斥保护，是取证工具的特权也是责任）。
+     建议先停掉所有 ALAS 实例再跑。
+
   1) 采集基线（此时悬浮窗里的目标功能请保持「开」）：
        python dev_tools/mod_discover.py --serial 127.0.0.1:16416 snapshot baseline
 

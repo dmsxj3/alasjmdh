@@ -132,9 +132,9 @@ class ScriptedDevice(FakeDevice):
 def make_prefs(**config_values):
     cfg = FakeConfig(**config_values)
     dev = ScriptedDevice()
-    # check_root 的 root 探测结果有类级缓存（生产优化），测试里每个用例
-    # 都必须从干净状态开始，否则会吃到上一个用例的 root=True/False。
-    ModPrefs._ROOT_OK = None
+    # check_root 的 root 探测结果有类级缓存（按 serial 键，生产优化），测试里
+    # 每个用例都必须从干净状态开始，否则会吃到上一个用例的 root=True/False。
+    ModPrefs._ROOT_OK.clear()
     return ModPrefs(config=cfg, device=dev), cfg, dev
 
 

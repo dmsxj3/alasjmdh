@@ -42,17 +42,26 @@ TEAL = (128, 203, 196)          # #80CBC4，滑块 thumb 的实测颜色
 class OverlayDevice(FakeDevice):
     """在 FakeDevice 上补上 overlay 用到的 dumpsys / wm size 通道。"""
 
+    # am startservice 成功时的真实输出（正向判据 N-1 的锚点）
+    START_OK = 'Starting service: Intent { cmp=com.bilibili.azurlane/com.android.support.Launcher }'
+    # su 不可用时的真实输出（adbutils shell 失败不抛异常、返回错误文本且不含 Error）
+    SU_MISSING = 'sh: su: inaccessible or not found'
+
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
         self.windows_dump = ''
         self.focus_dump = ''
         self.overlay_alive = True
         # 模拟 shell 启动未导出 Service 被拒（现场：Requires permission not
-        # exported from uid 10046）。设为错误串后，普通 startservice 返回它，
-        # su -c 的 startservice 模拟 root 成功（返回空）。
+        # exported from uid 10046）。设为错误串后，普通 startservice 返回它。
         self.startservice_error = None
-        # False 时模拟 su 通道不可用（su 命令返回 Error），用于测无 root 兜底
+        # True 时模拟 su 通道不可用（返回 `sh: su: inaccessible or not found`，
+        # 真实串 —— adbutils 的 shell 失败不抛异常也不含 "Error"，N-1 的坑）
         self.su_fails = False
+        # N-3：模拟「mod 收到 startservice 但没把小球放出来」的时序 ——
+        # 第 1 次 su start 返回成功却不放面板，第 2 次才放（lazy_panel=True 时）
+        self.su_start_calls = 0
+        self.lazy_panel = False
 
     def adb_shell(self, cmd, timeout=10, **kwargs):
         if isinstance(cmd, (list, tuple)):
@@ -69,14 +78,17 @@ class OverlayDevice(FakeDevice):
             return self.focus_dump
         if cmd.startswith('su -c') and 'am stopservice' in cmd:
             self.calls.append(cmd)
-            return 'Error: su denied' if self.su_fails else ''
+            return self.SU_MISSING if self.su_fails else 'Stopping service: Intent { cmp=com.bilibili.azurlane/com.android.support.Launcher }'
         if cmd.startswith('su -c') and 'am startservice' in cmd:
             self.calls.append(cmd)
             if self.su_fails:
-                return 'Error: su denied'
+                return self.SU_MISSING
+            self.su_start_calls += 1
+            if self.lazy_panel and self.su_start_calls < 2:
+                return self.START_OK          # 输出成功但小球没放出来（N-3 时序）
             # 模拟 root 重建 Service 成功：mod 把小球重新放回屏幕
             self.windows_dump = self.windows_dump or DUMP
-            return ''
+            return self.START_OK
         if 'am startservice' in cmd and self.startservice_error:
             self.calls.append(cmd)
             return self.startservice_error
@@ -409,6 +421,17 @@ eq('su 不可用 + 普通启动被拒 -> show() False（交给降级）',
    o16.show(timeout=0.5), False)
 plain = [c for c in dev16.calls if 'am startservice' in c and 'su -c' not in c]
 check('兜底普通 startservice 有尝试', len(plain) >= 1, str(plain))
+
+# 7b-3 ★ N-3 时序：stopservice 是异步的，首次 start 对「还没停完的 Service」
+# 可能变成 no-op（输出成功但小球没放出来）。show() 会在 ~3s 时补发一次 start。
+o17, cfg17, dev17 = make_overlay()
+dev17.lazy_panel = True                            # 第 1 次 start 假成功、第 2 次才放面板
+dev17.windows_dump = ''
+dev17.calls.clear()
+eq('首次 start 空响应 -> ~3s 补发后面板出现 -> show() True',
+   o17.show(timeout=6), True)
+check('补发确实发生（su start 调了两次）', dev17.su_start_calls >= 2,
+      f'su_start_calls={dev17.su_start_calls}')
 
 # ---------------------------------------------------------------- 8. 配置读取
 checker.header('8. 配置读取与边界')
