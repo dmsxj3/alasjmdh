@@ -121,7 +121,6 @@ class ModUi(ModuleBase):
             logger.warning(f'ModUi: UiWaitTimeout={raw!r} 不是数字，回退 5s')
             det.wait_timeout = 5.0
         return det.wait_timeout
-        return det.wait_timeout
 
     def _find_switch(self, label):
         """

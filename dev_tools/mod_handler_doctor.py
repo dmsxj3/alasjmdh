@@ -282,8 +282,10 @@ def main():
         data_cfg['ModHandler']['ModHandler']['OnKeys'] = new_on
         # 原子写（复用 ALAS 自己的 write_file，带 default=str），避免 open('w')
         # 中断时把实例配置截断 —— 配置文件废了 ALAS 会直接读不了（F5-1）。
+        # ★ 第一参数是【路径】不是配置名：传裸文件名会写到 cwd（doctor 已
+        #   chdir(ROOT) => 仓库根），config/<实例>.json 根本不会变（N6-1）。
         from module.config.utils import write_file
-        write_file(f'{name}.json', data_cfg)
+        write_file(path, data_cfg)
         print(f'\n  [+] 已写入 {path}')
         print(f'      OffKeys = {new_off}')
         print(f'      OnKeys  = {new_on}')
