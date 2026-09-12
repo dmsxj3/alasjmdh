@@ -294,7 +294,10 @@ class ModHandler(ModuleBase):
         if device is not None:
             self.device = device
         self._backend_obj = None
-        # 本次会话里最近一次「明确做出」的决定（与磁盘缓存互为补充）
+        # 本次会话里最近一次「明确做出」的决定（与磁盘缓存互为补充）。
+        # ★ 跨任务边界的记忆实际只靠落盘缓存 mod_state_<config>.json 兜底：
+        #   alas.py 每个任务边界都新建 ModHandler 实例，这个实例属性活不过
+        #   一次调度循环，只对实例内的 force 调用有意义 —— 别把它当持久状态。
         self._last_want = None
 
     # ------------------------------------------------------------ 配置读取
@@ -576,6 +579,7 @@ class ModHandler(ModuleBase):
             # 不在任何分组里：不做新的推测。
             # 沿用「上一次明确的决定」，这样共斗 -> daily 之类不会把关闭状态顶掉；
             # 若本次会话与本地缓存都没有决定过，则完全不动。
+            # （实际来源是落盘缓存：_last_want 活不过任务边界，见 __init__ 注释。）
             want_on = self._last_want
             if want_on is None:
                 want_on = self.get_state()

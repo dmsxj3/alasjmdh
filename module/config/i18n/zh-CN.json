@@ -3277,7 +3277,7 @@
     },
     "OverlayService": {
       "name": "悬浮窗调起组件",
-      "help": "mod 里注册但平时不会被调用的备用 Service。用 root 执行 stopservice + startservice 就能让悬浮窗重新出现。\n必须先停再启 —— Service 还活着时 startservice 只走 onStartCommand，不会重建窗口。\n★ 只在游戏进程已经在跑时才调起：进程不在时 startservice 会新起一个进程，那里原生库还没初始化，Launcher.onCreate -> new Menu -> Menu.Icon() 会抛 UnsatisfiedLinkError 把游戏整个搞崩。\n默认 com.android.support.Launcher（JMBQ 3.4.0 实测）。"
+      "help": "mod 里注册但平时不会被调用的备用 Service（exported=false）。用 shell 直接启动会被 Android 12 拒绝（not exported），代码会自动走 root：su -c stopservice + startservice 真正重建 Service，让悬浮窗重新出现（必须先停再启 —— Service 还活着时 startservice 只走 onStartCommand，不会重建窗口）。\n如果面板/小球还在屏幕上，会直接使用它，完全不碰 Service。\n★ 只在游戏进程已经在跑时才调起：进程不在时 startservice 会新起一个进程，那里原生库还没初始化，Launcher.onCreate -> new Menu -> Menu.Icon() 会抛 UnsatisfiedLinkError 把游戏整个搞崩。\n默认 com.android.support.Launcher（JMBQ 3.4.0 实测）。"
     },
     "OverlaySurvivalSeconds": {
       "name": "悬浮窗存活秒数（兜底值）",
@@ -3288,8 +3288,8 @@
       "help": "开启（默认）：改完之后，除了读 XML 精确核对外，再截一张图做第二道确认 ——\n三个倍率：在截图上找滑块 thumb（青色圆点）的位置反解数值；「以德服人」：采样开关区域的颜色判断开/关。\n这一条只做记录：识图读不出来（背景干扰等）不会判失败，权威判据始终是 XML。"
     },
     "OverlayFallbackPrefs": {
-      "name": "失败时降级到 prefs",
-      "help": "关闭（默认）：悬浮窗方式没能确认生效时只报 CRITICAL 日志，绝不重启游戏。\n开启则是安全网：自动降级去改共享配置 XML，宁可多一次重启，也不让敏感任务（演习/META/共斗）带着倍率开打 —— 但倍率可能仍是开着的。按需自开。"
+      "name": "失败时降级到 prefs（已废弃，恒为自动）",
+      "help": "★ 已废弃：悬浮窗失败时现在总是自动降级（停游戏 → 重写 prefs → ALAS 自动拉起游戏），仍失败则停机并推送通知。这个开关不再被读取，保留仅为配置兼容。"
     }
   },
   "Storage": {

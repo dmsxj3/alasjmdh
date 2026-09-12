@@ -3277,7 +3277,7 @@
     },
     "OverlayService": {
       "name": "オーバーレイ起動用コンポーネント",
-      "help": "mod に登録されているが通常呼ばれない予備 Service。root で stopservice + startservice すると再表示されます。\n必ず停止してから起動してください（生存中は onStartCommand のみでウィンドウは再生成されません）。\nゲームプロセスが動作中のときだけ起動します：無い状態で startservice すると新規プロセスが起動し、Launcher.onCreate -> new Menu -> Menu.Icon() が UnsatisfiedLinkError でゲームごと落ちます。\n既定 com.android.support.Launcher（JMBQ 3.4.0 実測）。"
+      "help": "mod に登録されているが通常は呼ばれない予備 Service（exported=false）。shell からの直接起動は Android 12 で拒否される（not exported）ため、コードは自動的に root 経路を使います：su -c stopservice + startservice で Service を本当に再構築し、floating window を再表示します（先に停止してから起動する必要があります —— Service が生存中の場合、startservice は onStartCommand のみを通過し、ウィンドウは再構築されません）。\nパネル/ボールが画面上にあれば、それを直接使用し Service には触れません。\n★ ゲームプロセスが起動している時のみ呼び出します：プロセスがない状態で startservice すると新しいプロセスが立ち上がり、ネイティブライブラリが未初期化のため Launcher.onCreate -> new Menu -> Menu.Icon() が UnsatisfiedLinkError を投げ、ゲーム全体がクラッシュします。\nデフォルト com.android.support.Launcher（JMBQ 3.4.0 で実測）。"
     },
     "OverlaySurvivalSeconds": {
       "name": "オーバーレイ生存秒数（フォールバック）",
@@ -3288,8 +3288,8 @@
       "help": "既定で有効：XML による厳密確認に加えて、スクリーンショットでも二重確認します（スライダーのつまみ位置から倍率を逆算し、スイッチの色をサンプリング）。\nこれは記録用です：読み取れなくても失敗扱いにはせず、XML の判定を優先します。"
     },
     "OverlayFallbackPrefs": {
-      "name": "失敗時は prefs に降格",
-      "help": "既定で無効：オーバーレイ方式で効果を確認できない場合は CRITICAL ログのみで、ゲームを再起動しません。\n有効にすると安全網として共有設定 XML の書き換えに降格します（再起動が必要）。敏感タスク（演習/META/共闘）が倍率オンのまま走るよりまし、という場合に任意で有効化してください。"
+      "name": "失敗時の prefs フォールバック（廃止済み・常に自動）",
+      "help": "★ 廃止済み：floating window が失敗した場合、常に自動フォールバック（ゲーム停止 → prefs 再書き込み → ALAS が自動で再起動）を行い、それでも失敗した場合は停止して通知を送ります。このスイッチは読み取られなくなり、設定互換のためだけに残されています。"
     }
   },
   "Storage": {

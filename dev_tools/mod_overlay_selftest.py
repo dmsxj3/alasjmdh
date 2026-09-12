@@ -203,19 +203,24 @@ DUMP = (
                    '400,200][700,400')
 )
 eq('取 TOP 悬浮窗（跳过 Activity 与 CENTER 对话框）',
-   ModOverlay._parse_window(DUMP, 'TOP'), (456, 6, 435, 501))
+   ModOverlay._parse_window(DUMP, 'TOP', package='com.bilibili.azurlane'), (456, 6, 435, 501))
 eq('取 CENTER 对话框（排查用）',
-   ModOverlay._parse_window(DUMP, 'CENTER'), (400, 200, 300, 200))
+   ModOverlay._parse_window(DUMP, 'CENTER', package='com.bilibili.azurlane'), (400, 200, 300, 200))
 
 DUMP_COLLAPSED = window_block(
     '1 Window{a2 u0 com.bilibili.azurlane/com.android.support.Launcher}',
     '(1200,6)(24,39) gr=TOP|LEFT|CENTER sim={} ty=APPLICATION_OVERLAY fl=NOT_FOCUSABLE',
     '1200,6][1224,45')
-eq('收起态小球矩形', ModOverlay._parse_window(DUMP_COLLAPSED, 'TOP'), COLLAPSED)
-eq('空输出 -> None', ModOverlay._parse_window('', 'TOP'), None)
+eq('收起态小球矩形', ModOverlay._parse_window(DUMP_COLLAPSED, 'TOP', package='com.bilibili.azurlane'), COLLAPSED)
+eq('空输出 -> None', ModOverlay._parse_window('', 'TOP', package='com.bilibili.azurlane'), None)
+OTHER_APP = window_block('9 Window{zz u0 com.example.other/SomeOverlay}',
+                         '(456,6)(435,501) gr=TOP|LEFT|CENTER sim={} ty=APPLICATION_OVERLAY fl=NOT_FOCUSABLE',
+                         '456,6][891,507')
+eq('别的 App 的 TOP 悬浮窗 -> 不过滤会误判，加包名后为 None',
+   ModOverlay._parse_window(OTHER_APP, 'TOP', package='com.bilibili.azurlane'), None)
 eq('没有 overlay 窗口 -> None',
    ModOverlay._parse_window(window_block('0 Window{a1}', '(0,0)(1280,720) ty=APPLICATION',
-                                        '0,0][1280,720'), 'TOP'), None)
+                                        '0,0][1280,720'), 'TOP', package='com.bilibili.azurlane'), None)
 
 o4, _, dev4 = make_overlay()
 dev4.windows_dump = DUMP

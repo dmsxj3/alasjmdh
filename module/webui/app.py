@@ -360,25 +360,36 @@ class AlasGUI(Frame):
         if task != "ModHandler":
             return
 
-        info = None
-        try:
-            from module.config.deep import deep_get as _deep_get
-            from module.mod_handler.mod_prefs import describe_state_readonly
+        # ★ 简单节流：describe_state_readonly 里有 subprocess（adb devices +
+        #   adb shell su cat），设备掉线时最坏 30s+30s，而 webui 每次重渲染都会
+        #   调到这里 —— 同步阻塞渲染线程。5 秒内同实例直接复用上一次结果。
+        import time as _time
+        now = _time.time()
+        cache_key = f'{self.alas_name}|{self.alas_mod}'
+        cache = getattr(self.__class__, '_mod_state_cache', None)
+        if cache and cache[2] == cache_key and now - cache[0] < 5:
+            info = cache[1]
+        else:
+            info = None
+            try:
+                from module.config.deep import deep_get as _deep_get
+                from module.mod_handler.mod_prefs import describe_state_readonly
 
-            # 诊断用：把「GUI 认为当前是哪个实例」和「读到的 key」一并落日志。
-            # 页面显示"尚未配置"时，这一行能直接区分是选错实例还是配置真的为空。
-            _raw_off = _deep_get(config, ["ModHandler", "ModHandler", "OffKeys"], default=None)
-            _raw_on = _deep_get(config, ["ModHandler", "ModHandler", "OnKeys"], default=None)
-            logger.info(f"ModHandler read: instance={self.alas_name!r} mod={self.alas_mod!r} "
-                        f"OffKeys={_raw_off!r} OnKeys={_raw_on!r}")
+                # 诊断用：把「GUI 认为当前是哪个实例」和「读到的 key」一并落日志。
+                # 页面显示"尚未配置"时，这一行能直接区分是选错实例还是配置真的为空。
+                _raw_off = _deep_get(config, ["ModHandler", "ModHandler", "OffKeys"], default=None)
+                _raw_on = _deep_get(config, ["ModHandler", "ModHandler", "OnKeys"], default=None)
+                logger.info(f"ModHandler read: instance={self.alas_name!r} mod={self.alas_mod!r} "
+                            f"OffKeys={_raw_off!r} OnKeys={_raw_on!r}")
 
-            info = describe_state_readonly(config)
-            serial = deep_get(config, ["Alas", "Emulator", "Serial"], default=None)
-            if info.get("option") == "unknown" and serial:
-                info["detail"] = f'{info.get("detail", "")}（Emulator.Serial={serial}）'
-        except Exception as e:
-            logger.warning(f"Failed to read modifier state: {type(e).__name__}: {e}")
-            info = {"option": "unknown", "detail": f"读取失败: {type(e).__name__}: {e}"}
+                info = describe_state_readonly(config)
+                serial = deep_get(config, ["Alas", "Emulator", "Serial"], default=None)
+                if info.get("option") == "unknown" and serial:
+                    info["detail"] = f'{info.get("detail", "")}（Emulator.Serial={serial}）'
+                setattr(self.__class__, '_mod_state_cache', (now, info, cache_key))
+            except Exception as e:
+                logger.warning(f"Failed to read modifier state: {type(e).__name__}: {e}")
+                info = {"option": "unknown", "detail": f"读取失败: {type(e).__name__}: {e}"}
 
         values = deep_get(config, ["ModHandler", "ModHandler"], default=None)
         if not isinstance(values, dict):

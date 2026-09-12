@@ -132,6 +132,9 @@ class ScriptedDevice(FakeDevice):
 def make_prefs(**config_values):
     cfg = FakeConfig(**config_values)
     dev = ScriptedDevice()
+    # check_root 的 root 探测结果有类级缓存（生产优化），测试里每个用例
+    # 都必须从干净状态开始，否则会吃到上一个用例的 root=True/False。
+    ModPrefs._ROOT_OK = None
     return ModPrefs(config=cfg, device=dev), cfg, dev
 
 
@@ -183,7 +186,7 @@ p, cfg, dev = make_prefs(OffKeys='')
 check('OffKeys 为空时返回 False', p.set_multiplier(False) is False)
 eq('OffKeys 为空时不碰设备', dev.calls, [])
 
-# 2.5 非 root
+# 2.5 非 root（make_prefs 已重置 root 探测缓存）
 p, cfg, dev = make_prefs()
 dev.root = False
 try:

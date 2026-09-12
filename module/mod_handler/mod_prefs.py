@@ -65,10 +65,19 @@ def _shell_quote(s):
 
 def _find_adb_static():
     """模块级版 find_adb：不需要实例。"""
-    for candidate in ('./bin/adb/adb.exe' if os.name == 'nt' else './bin/adb/adb',
-                      './toolkit/Lib/site-packages/adbutils/binaries/adb.exe',
-                      './toolkit/lib/site-packages/adbutils/binaries/adb.exe',
-                      '/usr/bin/adb'):
+    # 优先用 __file__ 拼出来的仓库内绝对路径 —— 相对路径('./toolkit/...')依赖 cwd，
+    # 换个 cwd（dev_tools chdir、从 Electron 启动）会静默退回 PATH 上的 adb。
+    here = os.path.dirname(os.path.abspath(__file__))          # .../module/mod_handler
+    repo = os.path.abspath(os.path.join(here, '..', '..'))     # 仓库根
+    candidates = [
+        os.path.join(repo, 'toolkit', 'Lib', 'site-packages', 'adbutils', 'binaries', 'adb.exe'),
+        os.path.join(repo, 'toolkit', 'lib', 'site-packages', 'adbutils', 'binaries', 'adb.exe'),
+        './bin/adb/adb.exe' if os.name == 'nt' else './bin/adb/adb',
+        './toolkit/Lib/site-packages/adbutils/binaries/adb.exe',
+        './toolkit/lib/site-packages/adbutils/binaries/adb.exe',
+        '/usr/bin/adb',
+    ]
+    for candidate in candidates:
         if os.path.exists(candidate):
             return candidate
     return 'adb'
@@ -284,11 +293,23 @@ class ModPrefs(ModuleBase):
         quoted = _shell_quote(cmd)
         return self.device.adb_shell(f'su -c {quoted}', timeout=timeout)
 
+    # root 状态在一次进程生命周期内不会变，做类级缓存：ModHandler/ModOverlay
+    # 每个任务边界都新建实例，实例级缓存无效；这里省掉每个边界的 su -c id
+    # 往返（实测 100~500ms/次）。失败（False）不缓存 —— root 断了恢复后要能自愈。
+    _ROOT_OK = None
+
     def check_root(self):
-        """返回 True 表示 su 可用。"""
+        """返回 True 表示 su 可用（进程内缓存，成功后不再重复探测）。"""
+        if ModPrefs._ROOT_OK is True:
+            return True
         try:
             out = self._su('id', timeout=15)
-            return 'uid=0' in str(out)
+            ok = 'uid=0' in str(out)
+            if ok:
+                ModPrefs._ROOT_OK = True
+            else:
+                logger.warning(f'ModPrefs: root check failed: su 未返回 uid=0（{str(out)[:60]}）')
+            return ok
         except Exception as e:
             logger.warning(f'ModPrefs: root check failed: {e}')
             return False

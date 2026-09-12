@@ -3277,7 +3277,7 @@
     },
     "OverlayService": {
       "name": "Overlay summon service",
-      "help": "A spare Service registered by the mod that is normally never used. With root, stopservice + startservice makes the overlay reappear.\nIt must be stop-then-start: while the Service is alive, startservice only triggers onStartCommand.\nOnly summoned when the game process is already running: if it is not, startservice spawns a fresh process where Launcher.onCreate -> new Menu -> Menu.Icon() throws UnsatisfiedLinkError and crashes the game.\nDefault com.android.support.Launcher (verified on JMBQ 3.4.0)."
+      "help": "A backup Service registered by the mod but normally never invoked (exported=false). Starting it via shell is rejected by Android 12 (not exported); the code automatically falls back to root: su -c stopservice + startservice to truly recreate the Service and bring the floating window back (stop first, then start — while the Service is alive, startservice only goes through onStartCommand and never recreates the window).\nIf the panel/ball is already on screen, it is used directly without touching the Service.\n★ Only invoke while the game process is running: without a process, startservice spawns a new one where native libs are uninitialized; Launcher.onCreate -> new Menu -> Menu.Icon() throws UnsatisfiedLinkError and crashes the whole game.\nDefault com.android.support.Launcher (tested on JMBQ 3.4.0)."
     },
     "OverlaySurvivalSeconds": {
       "name": "Overlay survival seconds (fallback)",
@@ -3288,8 +3288,8 @@
       "help": "On (default): besides the authoritative XML check, take a screenshot as a second opinion - locate the slider thumbs to derive the three multipliers, and sample the switch colours.\nThis is informational only: unreadable results never count as a failure; XML stays authoritative."
     },
     "OverlayFallbackPrefs": {
-      "name": "Fallback to prefs on failure",
-      "help": "Off (default): when the overlay path cannot be confirmed, only a CRITICAL log is written and the game is never restarted.\nTurn it on for a safety net: fall back to editing the shared-prefs XML (needs a restart) so a sensitive task never runs with the multiplier on. Enable at your own discretion."
+      "name": "Fall back to prefs on failure (deprecated, always automatic)",
+      "help": "★ Deprecated: on floating-window failure the code now ALWAYS auto-falls-back (stop game -> rewrite prefs -> ALAS relaunches it), and stops + pushes a notification if that still fails. This toggle is no longer read and is kept for config compatibility only."
     }
   },
   "Storage": {

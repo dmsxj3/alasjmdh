@@ -61,7 +61,11 @@ class ModUi(ModuleBase):
     def __init__(self, config=None, device=None):
         super().__init__(config=config, device=device)
         self.config = config
-        self.device = device
+        # 与 mod_prefs/mod_overlay 同一套规避：device=None 时 ModuleBase.__init__
+        # 已经按 config 建好了 Device，无条件覆盖会把 self.device 变成 None，
+        # 之后 self.d 连接时直接 AttributeError。
+        if device is not None:
+            self.device = device
         self._d = None
 
     # ------------------------------------------------------------ 配置
@@ -97,7 +101,9 @@ class ModUi(ModuleBase):
         if self._d is None:
             import uiautomator2 as u2
             self._d = u2.connect(self.device.serial)
-        self.apply_wait_timeout()
+            # wait_timeout 的 setter 是一次同步设备 RPC，只在建立连接时设一次；
+            # 配置变更场景由「每任务边界新建 ModUi 实例」自然覆盖。
+            self.apply_wait_timeout()
         return self._d
 
     def apply_wait_timeout(self, connection=None):

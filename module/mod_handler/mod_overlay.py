@@ -5,10 +5,13 @@ ModOverlay — 悬浮窗直点后端（零重启）。
   1. 悬浮窗由注入游戏进程的代码创建，是 WindowManager 的 APPLICATION_OVERLAY 窗口，
      `fl=NOT_FOCUSABLE`（**没有** NOT_TOUCHABLE）⇒ 可以被点击。
   2. mod 里注册了一个平时不被调用的备用 Service（默认 com.android.support.Launcher，
-     exported=false）。用 root 执行
-        am stopservice -n <pkg>/<svc>  &&  am startservice -n <pkg>/<svc>
-     就能让悬浮窗重新出现（Service 还活着时只走 onStartCommand，不会重建窗口，
-     所以必须先 stopservice）。
+     exported=false）。★ 2026-09-12 现场修正：shell（uid 2000）对未导出 Service 的
+     startservice 会被 Android 12 拒绝（Error: Requires permission not exported from
+     uid 10046），必须走 root：su -c "am stopservice -n ..." && su -c "am startservice ..."
+     —— 先停后启才能让悬浮窗重新出现（Service 还活着时只走 onStartCommand，不会
+     重建窗口）。代码里的 show() 已封装好这条 su 链路。
+     另一个更省的路径：面板/小球还在屏幕上时直接用（overlay_frame 探测得到），
+     完全不碰 Service —— show() 已把这条放在最高优先级。
      ★ 约束 1：`am startservice` 在**游戏处于后台时会失败**
        （Android 8+ 后台启动限制报 `Error: app is in background ...`）。
      ★ 约束 2（更致命）：游戏进程**不存在**时 `am startservice` 会新拉起一个进程，
@@ -358,12 +361,15 @@ class ModOverlay(ModuleBase):
         return self._screen
 
     @staticmethod
-    def _parse_window(out, gravity):
+    def _parse_window(out, gravity, package=''):
         """
         从 dumpsys window windows 里找游戏进程 APPLICATION_OVERLAY 窗口的矩形并返回 (x0,y0,w,h)。
 
         gravity: 'TOP'   → 悬浮窗面板（gr=TOP|LEFT|CENTER，收起时是 24x39 的小球）
                  'CENTER'→ mod 的 AlertDialog（我们有意识地不使用它，仅用于排查）
+        package: 窗口头必须包含该包名才算命中 —— dumpsys 的窗口头自带
+                 `Window{... u0 <pkg>/<cmp>}`，加这条过滤后别的 App 的 TOP
+                 悬浮窗（同为 APPLICATION_OVERLAY）不会再被误认成 mod 面板。
         """
         block = []
         for line in out.splitlines():
@@ -378,6 +384,8 @@ class ModOverlay(ModuleBase):
             text = '\n'.join(block)
             block = []
             if 'APPLICATION_OVERLAY' not in text:
+                continue
+            if package and package not in text:
                 continue
             if not re.search(r'gr=\s*' + gravity, text):
                 continue
@@ -394,7 +402,7 @@ class ModOverlay(ModuleBase):
         取悬浮窗矩形 (x0, y0, w, h)，取不到返回 None。
 
         判据：同一窗口块里同时出现 APPLICATION_OVERLAY 与 gr=TOP*（悬浮窗是 TOP|LEFT|CENTER
-        对齐；mod 的 AlertDialog 是 gr=CENTER，靠这个区分）。
+        对齐；mod 的 AlertDialog 是 gr=CENTER，靠这个区分），且窗口头包含游戏包名。
         APPLICATION_OVERLAY 只由带 overlay 权限的窗口使用，不会误伤普通 Activity。
         """
         try:
@@ -402,7 +410,7 @@ class ModOverlay(ModuleBase):
         except Exception as e:
             logger.warning(f'ModOverlay: dumpsys window failed: {e}')
             return None
-        return self._parse_window(out, 'TOP')
+        return self._parse_window(out, 'TOP', package=self.package)
 
     def _expanded(self, frame):
         if not frame:
@@ -505,29 +513,18 @@ class ModOverlay(ModuleBase):
                            '跳过悬浮窗、直接降级')
             return False
 
+        # 0) 面板/小球已在屏幕上：直接用（收起态由 expand 点小球展开）。
+        #    ★ 探测放在焦点判断之前：面板在时连前台判定的那一次 dumpsys 都省掉。
+        #    overlay_frame 认 APPLICATION_OVERLAY 窗口，不会误伤普通 Activity。
+        if self.overlay_frame():
+            return True
+
         target = f'{self.package}/{self.service}'
         if not self._is_foreground():
             # 后台时 Android 会拒绝启动 Service（实测报 "Error: app is in background ..."）。
             # 但前台判定本身也可能因为转场/浮层而误判，所以只提示、不直接放弃，
             # 真正的结论由后面「窗口有没有出现」来定。
             logger.warning('ModOverlay: 当前焦点不在游戏上，am startservice 可能被系统拒绝')
-
-        # 1) 面板/小球已在屏幕上：直接用（收起态由 expand 点小球展开）。
-        #    overlay_frame 认 APPLICATION_OVERLAY 窗口，不会误伤普通 Activity。
-        if self.overlay_frame():
-            return True
-
-        def _run(cmd):
-            try:
-                self.device.adb_shell(cmd)
-                return True
-            except Exception:
-                try:
-                    self.device.adb_shell('su -c "' + ' '.join(cmd) + '"')
-                    return True
-                except Exception as e:
-                    logger.warning(f'ModOverlay: `{" ".join(cmd)}` failed: {e}')
-                    return False
 
         # 2) 面板不在屏幕上：用 su 强制重建 Service（stopservice + startservice）。
         #    ★ 现场教训（2026-09-12 19:58）：面板存活期（-98）过后小球消失，但
@@ -550,6 +547,9 @@ class ModOverlay(ModuleBase):
             logger.warning(f'ModOverlay: su startservice 失败: {e}')
         if 'Error' in out or not out:
             # su 通道不可用（无 root / su 被拒）：退回普通 startservice 兜底。
+            # 判据说明：'Error' in out 确实偏松（大小写敏感、全文匹配），但 am 的
+            # 失败输出都以 Error 行开头，误报的代价只是多一次廉价 adb 往返；
+            # 收窄到具体错误串反而有漏报风险，故保持宽松。
             try:
                 out = str(self.device.adb_shell(['am', 'startservice', '-n', target]) or '')
             except Exception as e:
@@ -828,8 +828,9 @@ class ModOverlay(ModuleBase):
           1. 已经是目标状态 -> 直接返回 True，不碰设备；
           2. **游戏没在跑** -> 直接写 prefs（写 XML）。此刻不需要停游戏、不需要重启，
              游戏下次启动就读到新值 —— 实例刚启动、游戏还没起来时走的就是这条；
-          3. 游戏在跑 -> 调起悬浮窗点滑块/开关；失败且开了 OverlayFallbackPrefs
-             才降级到 prefs（那条路要停游戏，代价是一次重启）。
+          3. 游戏在跑 -> 调起悬浮窗点滑块/开关；失败 -> 自动降级：停游戏 + prefs
+             重写（写完由 ALAS 排 Restart 拉起）。2026-09-12 起不再受
+             OverlayFallbackPrefs 开关控制（该选项已废弃），也绝不停机。
 
         Args:
             mode: True = 开倍率（OnKeys），False = 关倍率（OffKeys）
