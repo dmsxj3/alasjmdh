@@ -704,6 +704,29 @@ class ModOverlay(ModuleBase):
                 logger.info(f'ModOverlay: 开关识图跳过（{type(e).__name__}: {e}）')
         return result or None
 
+    @staticmethod
+    def _visual_contradiction(visual, target, bool_keys=()):
+        """
+        「prefs 回读说已达目标，截图反解却明确不符」的判定，返回可读原因或 None。
+
+        ★ 只认**明确不符**（`is False`）。截图失败、识图读不出来、没配开关这三种情况
+        在 result 里表现为「键不存在 / 值为 None」，它们都不算矛盾 —— 识图只是第二道
+        确认，读不出来时它没有发言权，只有「看清楚了且和目标相反」才值得报警。
+
+        为什么值得单独拎出来报：XML 是权威判据，所以这种情况下**倍率其实已经改好了**，
+        真正可疑的是「key -> 面板位置」的映射（OffKeys/OnKeys 填错，或面板改版导致
+        SLIDER_KEY_ROW 行序漂移）。这是唯一需要用户动手核对的信号。
+        """
+        if not visual:
+            return None
+        bad = []
+        if visual.get('numbers_ok') is False:
+            bad.append(f"倍率截图读数 {visual.get('numbers')} ≠ 目标 {target}")
+        if visual.get('toggle_ok') is False:
+            want = next((target[k] for k in bool_keys), None)
+            bad.append(f"开关截图读数 {visual.get('toggle')} ≠ 目标 {want}")
+        return '；'.join(bad) or None
+
     # ------------------------------------------------------------ 清场
     def _stop_requested(self):
         """
@@ -948,12 +971,27 @@ class ModOverlay(ModuleBase):
                         break
                 else:
                     cur = self._prefs_raw() or {}
+                    visual = None
                     if self.visual_verify:
                         try:
-                            self._verify_visual(frame, target)
+                            visual = self._verify_visual(frame, target)
                         except Exception as e:
                             logger.info(f'ModOverlay: 截图复核跳过（{type(e).__name__}: {e}）')
                     if self._at_target(cur, target, tol_int=self._tolerance(target)):
+                        # 只加日志、不改判据：XML 是权威，回读达标就算成功（误判也不会误停机）。
+                        # 但「XML 达标 + 截图明确不符」是映射漂移的特征信号，而且
+                        # _verify_visual 的 MISMATCH 走的是 logger.attr（INFO 级），
+                        # 在正常日志里根本看不见 —— 所以这里单独抬成 critical。
+                        reason = self._visual_contradiction(visual, target, bool_keys)
+                        if reason:
+                            logger.critical(
+                                f'ModOverlay: prefs 回读已达目标 {target}，'
+                                f'但截图反解明确不符 —— {reason}。'
+                                f'这通常不是「倍率没改成功」，而是 key 映射 / 滑块行序漂移：'
+                                f'XML 里那几个 key 已经不对应面板上那个位置的滑块了。'
+                                f'请用 dev_tools/mod_discover.py 核对 OffKeys/OnKeys，'
+                                f'并核对 mod_overlay.py 的 SLIDER_KEY_ROW 与真机面板行序。'
+                                f'本次仍按 XML 判定为成功，未停机。')
                         pid_after = self._game_pid()
                         if not pid_after or pid_after != pid_before:
                             self._crash_guard(pid_before, pid_after)

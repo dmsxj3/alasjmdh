@@ -17,7 +17,9 @@ import time
 import numpy as np
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from mod_handler_testkit import Checker, FakeConfig, FakeDevice, install_stubs  # noqa: E402
+from mod_handler_testkit import (  # noqa: E402
+    Checker, FakeConfig, FakeDevice, fake_logger, install_stubs,
+)
 
 install_stubs()
 
@@ -493,5 +495,63 @@ eq('游戏在跑 + HandleError 关闭 -> prefs 拒绝写入，返回 False',
    og5.set_multiplier(False), False)
 eq('游戏在跑 + HandleError 关闭 -> 不会偷偷强停游戏',
    [c for c in devg5.calls if c == 'app_stop'], [])
+
+# ---------------------------------------------------------------- 12. 视觉矛盾告警
+# 「XML 回读说已达目标，截图反解却明确不符」—— 只加 critical 日志，不改判据。
+# 为什么只加日志：XML 是权威，回读达标就是成功；而 _verify_visual 的 MISMATCH
+# 走 logger.attr（INFO 级），正常日志里看不见，所以这种组合值得单独抬级。
+checker.header('12. 视觉矛盾告警（XML 达标 + 截图明确不符 -> critical）')
+vc = ModOverlay._visual_contradiction
+eq('截图失败（visual=None）不算矛盾', vc(None, {'1': 1}, []), None)
+eq('空结果不算矛盾', vc({}, {'1': 1}, []), None)
+eq('一致时不算矛盾', vc({'numbers': {'1': 1}, 'numbers_ok': True}, {'1': 1}, []), None)
+eq('没有 numbers_ok 键（识图中途抛异常）不算矛盾',
+   vc({'numbers': {'1': 1}}, {'1': 1}, []), None)
+eq('numbers_ok 是 None 不算矛盾（只认明确的 False）',
+   vc({'numbers_ok': None}, {'1': 1}, []), None)
+eq('没配开关时 toggle_ok 缺失不算矛盾',
+   vc({'numbers_ok': True}, {'1': 1, '35': False}, []), None)
+check('倍率明确不符 -> 报矛盾',
+      '倍率' in (vc({'numbers': {'1': 1000}, 'numbers_ok': False}, {'1': 1}, []) or ''))
+check('开关明确不符 -> 报矛盾，且带上布尔键的目标值',
+      '开关' in (vc({'toggle': True, 'toggle_ok': False}, {'35': False}, ['35']) or '')
+      and 'False' in (vc({'toggle': True, 'toggle_ok': False}, {'35': False}, ['35']) or ''))
+
+
+def apply_with_visual(visual):
+    """
+    跑一次 _apply 的「已达标」分支，返回 (返回值, 命中的 critical 列表)。
+
+    把 show/expand/手势/等待全部钉死，只留「视觉矛盾」这一个变量 ——
+    这样断言的就是「告警有没有打」和「判据有没有被动过」。
+    """
+    ov, _, dv = make_overlay()
+    set_device_xml(ov, xml_of(**{'1': 1, '2': 1, '3': 1}))
+    dv.running = True                       # pid 稳定，不触发 _crash_guard
+    ov._pending = lambda *a, **k: (['1'], [])
+    ov.show = lambda *a, **k: True
+    ov.expand = lambda *a, **k: FRAME
+    ov._gesture_slider = lambda *a, **k: None
+    ov._alive = lambda *a, **k: True
+    ov.wait_gone = lambda *a, **k: True
+    ov._verify_visual = lambda *a, **k: visual
+    fake_logger.records.clear()
+    ret = ov._apply({'1': 1, '2': 1, '3': 1}, ['1'], [], False)
+    crit = [m for lvl, m in fake_logger.records
+            if lvl == 'critical' and '截图反解明确不符' in m]
+    return ret, crit
+
+
+ret, crit = apply_with_visual({'numbers': {'1': 1000}, 'numbers_ok': False})
+eq('截图明确不符时 _apply 仍然返回 True（判据没动）', ret, True)
+eq('截图明确不符时打了 1 条 critical', len(crit), 1)
+check('critical 里带了可执行的排查指引',
+      'mod_discover' in crit[0] and 'SLIDER_KEY_ROW' in crit[0],
+      crit[0][:90] if crit else '')
+
+ret, crit = apply_with_visual({'numbers': {'1': 1}, 'numbers_ok': True})
+eq('截图一致时返回 True 且不打 critical', (ret, crit), (True, []))
+ret, crit = apply_with_visual(None)
+eq('截图失败时返回 True 且不打 critical（不制造噪音）', (ret, crit), (True, []))
 
 sys.exit(checker.summary())
