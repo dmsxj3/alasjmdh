@@ -451,6 +451,11 @@ check('补发确实发生（su start 调了两次）', dev17.su_start_calls >= 2
       f'su_start_calls={dev17.su_start_calls}')
 
 # ---------------------------------------------------------------- 8. 配置读取
+# F-1 回归守卫：device=None 时不得把（自建的）Device 抹掉（第八轮 N8-2）
+_og = ModOverlay(config=FakeConfig(), device=None)
+check('ModOverlay: device=None 时不得把（自建的）Device 抹掉（F-1 守卫）',
+      _og.device is not None)
+
 checker.header('8. 配置读取与边界')
 o11, cfg11, dev11 = make_overlay(OverlayService='com.x.Y', OverlaySurvivalSeconds=45)
 eq('service 读配置', o11.service, 'com.x.Y')

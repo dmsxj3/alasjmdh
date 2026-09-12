@@ -186,6 +186,13 @@ p, cfg, dev = make_prefs(OffKeys='')
 check('OffKeys 为空时返回 False', p.set_multiplier(False) is False)
 eq('OffKeys 为空时不碰设备', dev.calls, [])
 
+# F-1 回归守卫：真实 ModuleBase 在 device=None 时会自建 Device（非 None）；
+# 后端若写成无条件 `self.device = device` 会把它抹成 None（第一轮 F-1 的坑，
+# 第八轮 N8-2 补的守卫 —— 桩已用哨兵模拟自建设备）。
+_pg = ModPrefs(config=FakeConfig(), device=None)
+check('ModPrefs: device=None 时不得把（自建的）Device 抹掉（F-1 守卫）',
+      _pg.device is not None)
+
 # 2.5 非 root（make_prefs 已重置 root 探测缓存）
 p, cfg, dev = make_prefs()
 dev.root = False

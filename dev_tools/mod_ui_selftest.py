@@ -347,4 +347,12 @@ eq('默认 UiWaitTimeout 为 5', ModUi(
     config=FakeConfig(UiWaitTimeout=''), device=FakeDevice()
 ).apply_wait_timeout(FakeU2([])), 5.0)
 
+# ---------------------------------------------------------------- 7. F-1 回归守卫
+# 真实 ModuleBase 在 device=None 时会自建 Device（非 None）；ModUi 曾写成无条件
+# `self.device = device` 把自建设备抹成 None（第一轮审查 F-1）。testkit 的桩已
+# 用哨兵模拟该行为 —— 此断言钉住「不得抹掉」（旧写法会立刻 FAIL）。
+ui_noguard = ModUi(config=FakeConfig(), device=None)
+check('ModUi: device=None 时不得把（自建的）Device 抹掉（F-1 守卫）',
+      ui_noguard.device is not None)
+
 sys.exit(1 if checker.summary() else 0)

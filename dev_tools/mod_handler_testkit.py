@@ -79,10 +79,17 @@ def install_stubs():
     # module.base.base
     base_mod = types.ModuleType('module.base.base')
 
+    # ★ 模拟真实 ModuleBase 的 device=None 语义（第八轮审查 N8-2）：
+    #   真实 base.py:46-48 在 device=None 时会 `self.device = Device(config=...)`
+    #   自建一个**非 None** 的设备对象。桩里用哨兵模拟 —— 否则「后端把自建的
+    #   Device 覆盖成 None」（F-1 那类 bug）在测试里与"传了 None"无法区分，
+    #   结构上测不出来。三个后端的守卫断言依赖这个哨兵。
+    _AUTO_DEVICE = object()
+
     class ModuleBase:
         def __init__(self, config=None, device=None, task=None):
             self.config = config
-            self.device = device
+            self.device = device if device is not None else _AUTO_DEVICE
 
         @property
         def app_stop(self):
@@ -112,6 +119,9 @@ class FakeConfig:
     def __init__(self, config_name='alas', **mod_values):
         values = {
             'Enabled': True,
+            # 刻意默认 'prefs' 而非发布默认 'overlay'（第八轮审查 N8-3）：
+            # 多数策略/状态机用例需要走 prefs 读写链路；Backend=overlay 的
+            # 用例请显式传 make_xxx(Backend='overlay')。
             'Backend': 'prefs',
             'PackageName': 'com.bilibili.azurlane',
             'PrefsFile': 'com.bilibili.azurlane_preferences',
@@ -228,7 +238,7 @@ class FakeDevice:
 # ---------------------------------------------------------------- 真实任务名
 def _load_yaml(path):
     """用 ALAS 自带的 yaml 解析，保证与 ALAS 自身看到的定义完全一致。"""
-    sys.path.insert(0, os.path.join(ROOT, 'toolkit', 'lib', 'site-packages'))
+    sys.path.insert(0, os.path.join(ROOT, 'toolkit', 'Lib', 'site-packages'))
     import yaml
     with open(path, encoding='utf-8') as f:
         return yaml.safe_load(f)

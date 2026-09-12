@@ -34,10 +34,11 @@ STDLIB_CANDIDATES = {
     'unittest', 'urllib', 'xml',
 }
 
-# 扫描目标：我们自己写的文件（mod_handler 包 + dev_tools 的 mod_* 脚本）
+# 扫描目标：我们自己写的文件（mod_handler 包 + dev_tools 的 mod_* 脚本，
+# 含三个 backend 自检与 mod_discover —— 第八轮审查 N8-1：曾用 mod_handler*
+# 的 glob 漏掉 3 个自检文件约 1400 行）
 TARGETS = (sorted(glob.glob(os.path.join(ROOT, 'module', 'mod_handler', '*.py')))
-           + sorted(glob.glob(os.path.join(ROOT, 'dev_tools', 'mod_handler*.py')))
-           + [os.path.join(ROOT, 'dev_tools', 'mod_discover.py')])
+           + sorted(glob.glob(os.path.join(ROOT, 'dev_tools', 'mod_*.py'))))
 
 
 def scan_file(path):
