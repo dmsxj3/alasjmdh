@@ -25,7 +25,7 @@ ModHandler — 改版客户端（JMBQ / azurlan）悬浮窗倍率控制。
   所以兜底只落在「写入后回读」这一层，且每一层都已经有了：
     * ModPrefs.verify_applied        —— 写完回读 XML，不一致即判失败
     * ModOverlay 点击后的 _at_target —— 点完绕开缓存重读，复核不通过即判失败
-    * ModHandler.read_backend_state  —— 关失败时二次回读，确实还开着就打 ERROR（不停机，自动降级兜底）
+    * ModHandler.read_backend_state  —— 关失败时二次回读，确认不了「已关」即停机推送
 """
 import json
 import os
@@ -416,7 +416,7 @@ class ModHandler(ModuleBase):
         这样用户手动动过悬浮窗也能被发现，而不是盲信本地缓存。
 
         ★ 统一归一化成真 bool / None：识图路径（overlay / ui）容易带出 numpy 布尔，
-        而下游是用 `is True` / `is False` 做安全判定的（_read_after_fail、
+        而下游是用 `is True` / `is False` 做安全判定的（_confirm_off_or_stop、
         check_then_set 的缓存写入），np.bool_(True) 会让那些判定静默失效。
         """
         try:
@@ -502,27 +502,39 @@ class ModHandler(ModuleBase):
             logger.attr('ModHandler', f'multiplier {"ON" if mode else "OFF"}')
         return bool(result)
 
-    def _read_after_fail(self, task):
+    def _confirm_off_or_stop(self, task):
         """
-        该关倍率时没关掉，回读设备上的真实状态供调用方决策。
+        该关倍率时没关掉 —— 后端内部已自动降级过一次（停游戏 + prefs 重写，
+        见 ModOverlay.set_multiplier）仍没达成。这里回读设备做最终裁决：
+        只有回读确认「已关」才放行，否则停机推送交人工。
 
-        ★ 2026-09-12 语义更新：**不再停机**。后端内部已经自动降级过一次
-        （停游戏 + prefs 重写，见 ModOverlay.set_multiplier），这里把「设备上
-        倍率仍开着」的事实用 ERROR 级别喊出来供人工关注，然后照常返回状态 ——
-        调用方保留缓存、下次任务边界重试，绝不因倍率问题卡死调度。
+        ★ 为什么 None（读不到）也停：降级失败意味着 prefs 通道断了（root 断、
+        读不到/写不进 XML），游戏重新拉起后倍率状态未知 —— 大概率仍是开的
+        （XML 里留着什么就是什么，例如用户手动开过）。此时继续跑敏感任务就是
+        封号风险，而且下一次重试大概率还是失败，只会一直带着倍率跑下去。
+        停机推送（alas.py 统一 Onepush + exit）是唯一安全的收尾。
 
         Returns:
-            bool/None: 回读到的真实状态（True = 确认仍开着，False = 确认已关，
-                       None = 读不到）。调用方用它决定要不要把「已达目标」写进本地缓存。
+            bool: False = 回读确认设备已关（安全，调用方继续正常流程）。
+                  其余情况（True = 确认仍开着 / None = 读不到）抛
+                  RequestHumanTakeover，不返回。
         """
         observed = self.read_backend_state()
-        if observed is not True:
-            return observed
+        if observed is False:
+            return False
         logger.hr('ModHandler', level=1)
-        logger.error(
-            f'ModHandler: 任务 `{task}` 需要关闭倍率，但关闭失败且回读确认倍率仍开着 —— '
-            f'自动降级也未能修复，本次继续运行，请人工关注')
-        return observed
+        if observed is True:
+            logger.critical(
+                f'ModHandler: 任务 `{task}` 需要关闭倍率，关闭失败且自动降级后回读确认'
+                f'倍率仍开着 —— 继续跑下去就是封号风险，停止 Alas 交人工处理')
+            raise RequestHumanTakeover(
+                f'ModHandler: failed to turn multiplier off for task `{task}`')
+        logger.critical(
+            f'ModHandler: 任务 `{task}` 关闭倍率失败，自动降级后仍读不到倍率状态 —— '
+            f'常见于手动改过倍率后 root/读取断开，游戏拉起后倍率大概率仍开着，'
+            f'继续跑下去就是封号风险，停止 Alas 交人工处理')
+        raise RequestHumanTakeover(
+            f'ModHandler: multiplier state unreadable for task `{task}` after auto-fallback')
 
     # ------------------------------------------------------------ 主逻辑
     def check_then_set(self, task, force=False):
@@ -553,14 +565,9 @@ class ModHandler(ModuleBase):
                 logger.warning('ModHandler 已关闭，但检测到该关倍率的任务里倍率仍开着，强制关闭')
                 changed = self.set_multiplier(False)
                 if not changed:
-                    observed = self._read_after_fail(task)
-                    if observed is not False:
-                        # 与 check_then_set 同一套道理：没回读确认「已关」时不要写缓存，
-                        # 否则下次会拿这份缓存当成「设备已经是关的」而直接跳过。
-                        logger.warning(
-                            'ModHandler: 未能确认倍率已关（回读 '
-                            f'{"unknown" if observed is None else "ON"}），保留原有缓存')
-                        return False
+                    # 后端内部已自动降级仍没达成：回读确认「已关」才继续，
+                    # 否则（确认还开着 / 读不到）停机推送。
+                    self._confirm_off_or_stop(task)
                 self.set_state(False)
                 return changed
             return False
@@ -642,22 +649,17 @@ class ModHandler(ModuleBase):
             # 后端返回 False 只剩「尝试过但没达成」（幂等已由后端返回 True 表达）。
             # 后端内部已经自动降级过一次（停游戏 + prefs 重写）仍没达成。
             if want_on is False:
-                # 回读设备真实状态：确认还开着时打 ERROR 供人工关注（不停机）。
-                # 返回值是回读到的真实状态，下面要用它决定缓存怎么写。
-                observed = self._read_after_fail(task)
+                # 该关而没关掉：回读确认「已关」才继续，否则（确认还开着 /
+                # 读不到）停机推送 —— 降级失败后游戏拉起时倍率大概率仍开着，
+                # 绝不带着疑问开打敏感任务。
+                observed = self._confirm_off_or_stop(task)
             else:
                 observed = self.read_backend_state()
             self._last_want = want_on
             if observed is not want_on:
-                # ★ 没达成目标时**不要**把目标写进缓存。
-                # 这份缓存会被 current_state() 当作「设备状态」的替身：一旦把
-                # 「已关」写进去，下一个敏感任务读到 current == want_on 就直接
-                # return，连写入都不再尝试 —— 那正是「以为关了其实没关」。
-                # 2026-09-12 语义：**不停机**。后端内部已自动降级过一次
-                # （停游戏 + prefs 重写，写完由 ALAS 拉起），仍失败时如实记
-                # warning、保留缓存，下一个任务边界会带着完整的降级链路再试。
-                # observed is None 的常见原因：手动改过倍率（自定义档位不在
-                # OffKeys/OnKeys 上）或设备读取断开。
+                # ★ 没达成目标时**不要**把目标写进缓存（want_on=True 的常规
+                # 任务路径才走得到这里；OFF 路径的缓存卫生由
+                # _confirm_off_or_stop 的「确认已关」前提保证）。
                 logger.warning(
                     f'ModHandler: 未能确认达成目标（task `{task}`，'
                     f'target {"ON" if want_on else "OFF"}，回读 '
