@@ -482,7 +482,7 @@ class ModOverlay(ModuleBase):
         （logcat: am_crash + am_proc_died，任务随后 GameNotRunningError）。
         所以这里宁可调不起悬浮窗，也绝不冒"为了省一次重启把游戏搞崩"的风险。
 
-        ★★ 2026-09-12 关键修正：面板在屏幕上就直接用，绝不 stopservice ★★
+        ★★ 2026-09-12 关键修正：面板在屏幕上就直接用；不在则用 su 强制重建 ★★
         现场证据：09-11 dsh 的成功日志里没有任何 startservice —— Service 一直
         活着、小球常驻屏幕，流程直接点小球展开；而现在的版本每次 show() 都
         「先 stopservice 再 startservice」，把活着的 Service 弄死之后，startservice
@@ -490,9 +490,13 @@ class ModOverlay(ModuleBase):
         permission not exported from uid 10046）—— 面板从此再也起不来，只能退化
         成停游戏 + prefs 重启。所以：
           1. 先探测面板/小球，在屏幕上就直接用（不碰 Service）；
-          2. 不在才 startservice（活着的 Service 是资产，不再先 stop）；
-          3. startservice 被「未导出」拒绝时立刻用 su 重试（root 不受 exported
-             限制，已 root 模拟器上这一步能救回链路）。
+          2. 不在 -> 用 su 真正重建 Service（su stopservice + su startservice，
+             root 不受 exported 限制；重建触发 onCreate 把小球放出来）。为什么
+             必须先 stop：存活期（-98）过后小球消失但 Service 仍活着，对已运行
+             的 Service startservice 是 no-op，mod 不会重新放小球，等 10s 必超时
+             （19:58 短猫相接现场）；
+          3. su 不可用（无 root）时退回普通 startservice 兜底，被拒则交给
+             prefs 降级链路。
         """
         if self._disabled:
             return False
@@ -525,27 +529,33 @@ class ModOverlay(ModuleBase):
                     logger.warning(f'ModOverlay: `{" ".join(cmd)}` failed: {e}')
                     return False
 
-        # 2) 面板不在屏幕上 -> startservice 让 mod 重新把小球放出来。
-        #    ★ 不再先 stopservice：活着的 Service 是资产，stop 掉之后 start
-        #    会被 exported 检查拒绝（见上），等于亲手毁掉唯一的悬浮窗通道。
+        # 2) 面板不在屏幕上：用 su 强制重建 Service（stopservice + startservice）。
+        #    ★ 现场教训（2026-09-12 19:58）：面板存活期（-98）过后小球消失，但
+        #    Service 仍活着 —— 对已运行的 Service 再 startservice 是 no-op，mod
+        #    不会重新放出小球，等 10s 必然超时，只能降级重启。root 的
+        #    stopservice 可以真正停掉它（root 不受 exported 限制），随后的
+        #    startservice 重新走 onCreate 把小球放出来。
+        #    su 不可用（无 root 设备）时退回普通 startservice 兜底（旧 Android
+        #    上 shell 启动未导出服务可能放行；被拒则交给 prefs 降级链路）。
+        out_stop = ''
+        try:
+            out_stop = str(self.device.adb_shell(f'su -c "am stopservice -n {target}"') or '')
+        except Exception as e:
+            logger.warning(f'ModOverlay: su stopservice 失败: {e}')
+        time.sleep(0.5)
         out = ''
         try:
-            out = str(self.device.adb_shell(['am', 'startservice', '-n', target]) or '')
-        except Exception:
+            out = str(self.device.adb_shell(f'su -c "am startservice -n {target}"') or '')
+        except Exception as e:
+            logger.warning(f'ModOverlay: su startservice 失败: {e}')
+        if 'Error' in out or not out:
+            # su 通道不可用（无 root / su 被拒）：退回普通 startservice 兜底。
             try:
-                out = str(self.device.adb_shell(f'su -c "am startservice -n {target}"') or '')
+                out = str(self.device.adb_shell(['am', 'startservice', '-n', target]) or '')
             except Exception as e:
                 logger.warning(f'ModOverlay: startservice failed: {e}')
-        # 3) shell 启动被「未导出」拒绝时立刻用 su 重试（root 不受 exported 限制）。
         if 'Error' in out:
             logger.warning(f'ModOverlay: startservice 报错: {out.strip()}')
-            try:
-                out2 = str(self.device.adb_shell(f'su -c "am startservice -n {target}"') or '')
-                if 'Error' not in out2:
-                    logger.info('ModOverlay: startservice 经 su 重试成功（root 越过 exported 限制）')
-                    out = out2
-            except Exception as e:
-                logger.warning(f'ModOverlay: startservice su 重试失败: {e}')
 
         deadline = time.time() + timeout
         while time.time() < deadline:

@@ -51,6 +51,8 @@ class OverlayDevice(FakeDevice):
         # exported from uid 10046）。设为错误串后，普通 startservice 返回它，
         # su -c 的 startservice 模拟 root 成功（返回空）。
         self.startservice_error = None
+        # False 时模拟 su 通道不可用（su 命令返回 Error），用于测无 root 兜底
+        self.su_fails = False
 
     def adb_shell(self, cmd, timeout=10, **kwargs):
         if isinstance(cmd, (list, tuple)):
@@ -65,9 +67,14 @@ class OverlayDevice(FakeDevice):
         if cmd.startswith('dumpsys window'):
             self.calls.append(cmd)
             return self.focus_dump
+        if cmd.startswith('su -c') and 'am stopservice' in cmd:
+            self.calls.append(cmd)
+            return 'Error: su denied' if self.su_fails else ''
         if cmd.startswith('su -c') and 'am startservice' in cmd:
             self.calls.append(cmd)
-            # 模拟 root 启动成功：mod 把小球重新放回屏幕
+            if self.su_fails:
+                return 'Error: su denied'
+            # 模拟 root 重建 Service 成功：mod 把小球重新放回屏幕
             self.windows_dump = self.windows_dump or DUMP
             return ''
         if 'am startservice' in cmd and self.startservice_error:
@@ -369,16 +376,14 @@ eq('游戏不在运行时不尝试调起 Service',
    [c for c in dev13.calls if 'startservice' in c], [])
 
 o14, cfg14, dev14 = make_overlay()
-dev14.windows_dump = ''                            # 窗口始终没出现
+dev14.windows_dump = ''                            # 面板不在屏幕上（存活期已过）
 dev14.calls.clear()
-eq('窗口没出现 -> show() 超时返回 False', o14.show(timeout=0.2), False)
-# ★ 2026-09-12：不再先 stopservice —— 现场（09-11 成功日志 vs 09-12 失败日志）
-# 证明 stop 会把活着的 Service 弄死，而重启它被 Android 12 的 exported 检查拒绝，
-# 面板从此起不来。活着的 Service 是资产，不是障碍。
-eq('show() 不再先 stopservice（不弄死活着的 Service）',
-   [c for c in dev14.calls if 'stopservice' in c], [])
-check('startservice 有正常尝试',
-      any('am startservice' in c for c in dev14.calls), str(dev14.calls))
+eq('面板不在 -> su 重建 Service 后面板出现 -> show() True',
+   o14.show(timeout=2), True)
+su_stop = [c for c in dev14.calls if 'su -c' in c and 'stopservice' in c]
+su_start = [c for c in dev14.calls if 'su -c' in c and 'startservice' in c]
+check('su 先 stopservice 再 startservice 各一次（重建触发 onCreate 放小球）',
+      len(su_stop) == 1 and len(su_start) == 1, f'stop={su_stop} start={su_start}')
 
 o15, cfg15, dev15 = make_overlay()
 dev15.windows_dump = DUMP
@@ -387,19 +392,18 @@ eq('面板已在屏幕上 -> show() 直接 True（不碰 Service）', o15.show(t
 eq('面板已在时不调 startservice/stopservice',
    [c for c in dev15.calls if 'startservice' in c or 'stopservice' in c], [])
 
-# 7b-2 ★ startservice 被「未导出」拒绝（2026-09-12 现场）-> 立刻 su 重试。
-# shell（uid 2000）无权启动未导出 Service，root 不受 exported 限制 —— 已 root
-# 模拟器上这一步救回整条悬浮窗链路，避免每次都退化成停游戏 + prefs 重启。
+# 7b-2 ★ su 通道不可用（无 root 设备）-> 退回普通 startservice 兜底；
+# 被「未导出」拒绝（现场：not exported from uid 10046）-> 面板不出，
+# 返回 False 交给 prefs 降级链路（停游戏 + prefs 重写）。
 o16, cfg16, dev16 = make_overlay()
+dev16.su_fails = True
 dev16.startservice_error = 'Error: Requires permission not exported from uid 10046'
 dev16.windows_dump = ''                            # 面板不在屏幕上
 dev16.calls.clear()
-eq('startservice 被拒 -> su 重试后面板出现 -> show() True',
-   o16.show(timeout=2), True)
+eq('su 不可用 + 普通启动被拒 -> show() False（交给降级）',
+   o16.show(timeout=0.5), False)
 plain = [c for c in dev16.calls if 'am startservice' in c and 'su -c' not in c]
-su_retry = [c for c in dev16.calls if 'su -c' in c and 'am startservice' in c]
-check('先普通一次、再 su 重试一次', len(plain) == 1 and len(su_retry) == 1,
-      f'plain={plain} su={su_retry}')
+check('兜底普通 startservice 有尝试', len(plain) >= 1, str(plain))
 
 # ---------------------------------------------------------------- 8. 配置读取
 checker.header('8. 配置读取与边界')
