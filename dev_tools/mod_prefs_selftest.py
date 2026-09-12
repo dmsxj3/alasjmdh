@@ -183,7 +183,9 @@ p, cfg, dev = make_prefs()
 dev.xml = build_xml(SAMPLE, {'1': 1, '2': 1, '3': 1})    # 设备上已经是「关」
 dev.calls.clear()
 changed = p.set_multiplier(False)
-check('已是目标状态时返回 False', changed is False)
+# 幂等返回 True（已达成）：与 overlay/ui 后端语义一致，
+# False 只留给「尝试过但没达成」，策略层据此区分正常跳过与真失败
+check('已是目标状态时返回 True（已达成）', changed is True)
 writes = [c for c in dev.calls if c.startswith(('app_stop', 'app_start', 'adb_push'))]
 eq('已是目标状态时不产生任何写动作', writes, [])
 

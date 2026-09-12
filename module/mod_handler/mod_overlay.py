@@ -49,8 +49,8 @@ ModOverlay — 悬浮窗直点后端（零重启）。
      用人眼可复现的方式再确认一遍。识图读不出来只记日志，不据此判失败。
 
 失败兜底：调不起悬浮窗、坐标对不上、或核对不通过时，按 `OverlayFallbackPrefs`
-（默认开）降级到 ModPrefs（写 XML + 重启游戏）。宁可多一次重启，也不能让敏感任务
-带着倍率跑 —— 那正是这个功能要防的封号风险。
+（默认关，打开后生效）降级到 ModPrefs（写 XML + 重启游戏）。宁可多一次重启，
+也不能让敏感任务带着倍率跑 —— 那正是这个功能要防的封号风险。
 """
 import re
 import time
@@ -70,7 +70,13 @@ except ImportError:  # pragma: no cover - webui 进程 PIL 被换成假模块时
 
 # 面板矩形内的相对坐标（比例；来自 1280x720 实测，(456,6)-(891,507) = 435x501）。
 # 用比例而不是像素，是为了在密度/分辨率变化时仍然对得上（面板是固定 dp 布局）。
-REL_SLIDER_Y = (0.321, 0.506, 0.687)   # 三个倍率滑块轨道的 y
+REL_SLIDER_Y = (0.321, 0.506, 0.687)   # 三个倍率滑块轨道的 y（0/1/2 行）
+# 键 -> 面板滑块行号的显式映射（REL_SLIDER_Y 的下标）。
+# 必须显式映射：配置里只填部分键时，不能拿「已配置键的排序子集」当行号，
+# 否则 OnKeys='1=1000,3=1000' 会把键 3（装填）当成第 1 行去拖——那是倍防的轨道。
+# {'1':0,'2':1,'3':2} 来自默认配置 OffKeys='1=1,2=1,3=1' 的实测（cfc364b3b）；
+# 面板新增滑块时请先在真机上核对行序再补表。
+SLIDER_KEY_ROW = {'1': 0, '2': 1, '3': 2}
 REL_TRACK_X = (0.083, 0.929)           # 轨道左右端（点击/拖拽落点用）
 REL_THUMB_X = (0.080, 0.917)           # thumb 在 最小值/最大值 时的中心 x（截图反解用）
 REL_TOGGLE = (0.947, 0.771)            # 以德服人 开关中心
@@ -91,15 +97,18 @@ def _safe_int(text, default=None):
 
 
 class ModOverlay(ModuleBase):
+    # 一旦检测到「调起悬浮窗把游戏搞崩（pid 变化/消失）」，本进程内永久停用 overlay，
+    # 后续全部走 prefs 降级 —— 绝不在崩溃上重试，避免把游戏打进崩溃循环。
+    # 类属性：alas.py 的调度循环每个任务边界都会 new 一个 ModHandler（后端随之
+    # 重建），实例属性只活一轮；类属性才能跨任务边界保持「已停用」状态。
+    _disabled = False
+
     def __init__(self, config=None, device=None):
         super().__init__(config=config, device=device)
         self.config = config
         self.device = device
         self._prefs = None
         self._screen = None
-        # 一旦检测到「调起悬浮窗把游戏搞崩（pid 变化/消失）」，本进程内永久停用 overlay，
-        # 后续全部走 prefs 降级 —— 绝不在崩溃上重试，避免把游戏打进崩溃循环。
-        self._disabled = False
 
     # ------------------------------------------------------------ 配置
     @property
@@ -209,7 +218,12 @@ class ModOverlay(ModuleBase):
         """
         parsed（prefs 解析结果）是否已经等于 target。
         整型允许 tol_int 的容差：滑块 UI 可能有最小步进，写回去不一定正好等于配置值。
+
+        空 target 一律判不命中（与 ModPrefs._match / _match_prefs 保持一致）：
+        否则「没有任何要检查的键」会被当成「已经达成」，调用方会误判成功。
         """
+        if not target:
+            return False
         for k, want in target.items():
             cur = parsed.get(str(k))
             if cur is None:
@@ -538,13 +552,16 @@ class ModOverlay(ModuleBase):
         return int(xa + (idx[0] + idx[-1]) / 2)
 
     def _read_slider_values(self, image, frame, int_keys):
-        """从截图反解三个滑块的数值；读不出来的键不放进结果。"""
+        """从截图反解滑块的数值；读不出来的键、不在行映射表里的键都不放进结果。"""
         x0, y0, w, h = frame
         a = x0 + REL_THUMB_X[0] * w
         b = x0 + REL_THUMB_X[1] * w
         out = {}
-        for i, key in enumerate(int_keys[:len(REL_SLIDER_Y)]):
-            cx = self._thumb_center(image, int(y0 + REL_SLIDER_Y[i] * h),
+        for key in int_keys:
+            row = SLIDER_KEY_ROW.get(str(key))
+            if row is None or row >= len(REL_SLIDER_Y):
+                continue
+            cx = self._thumb_center(image, int(y0 + REL_SLIDER_Y[row] * h),
                                     x0, x0 + w)
             if cx is None:
                 continue
@@ -732,8 +749,9 @@ class ModOverlay(ModuleBase):
             if self.fallback_enabled:
                 logger.warning('ModOverlay: 降级到 prefs（需要重启游戏才生效）')
                 try:
-                    from module.mod_handler.mod_prefs import ModPrefs
-                    changed = ModPrefs(config=self.config, device=self.device).set_multiplier(mode)
+                    # 走 prefs_reader 复用实例：既省一次构造，也让降级链路可被
+                    # 自检脚本用桩替换（dev_tools/mod_overlay_selftest.py）
+                    changed = self.prefs_reader.set_multiplier(mode)
                     return bool(changed)
                 except Exception as e:
                     logger.error(f'ModOverlay: prefs 降级也失败: {type(e).__name__}: {e}')
@@ -779,10 +797,22 @@ class ModOverlay(ModuleBase):
             logger.info(f'ModOverlay: 目标 {target} | 待改 int={todo_int} bool={todo_bool}')
 
             for key in todo_int:
-                row = sorted(int_keys).index(str(key))
+                # 行号来自显式映射表，不是「已配置键的排序位置」——
+                # 配置只填部分键时后者会拖错别人的轨道
+                row = SLIDER_KEY_ROW.get(str(key))
+                if row is None or row >= len(REL_SLIDER_Y):
+                    logger.warning(
+                        f'ModOverlay: 键 {key} 不在滑块行映射表 {SLIDER_KEY_ROW} 内，'
+                        f'跳过（面板行序有变时请在真机核对后更新 SLIDER_KEY_ROW）')
+                    continue
                 lo, hi = self._bounds(key)
                 want = int(target[key])
                 to_max = want >= hi
+                if lo < hi and want not in (lo, hi):
+                    logger.warning(
+                        f'ModOverlay: 键 {key} 目标值 {want} 不是极值（{lo}/{hi}），'
+                        f'滑块手势只能拖到极值，将拖到{"最大" if to_max else "最小"}，'
+                        f'后续校验可能失败')
                 logger.info(f'ModOverlay: 键 {key} -> {want}（滑块拖到{"最大" if to_max else "最小"}）')
                 self._gesture_slider(frame, row, to_max)
                 time.sleep(0.5)
@@ -827,7 +857,8 @@ class ModOverlay(ModuleBase):
         return bool(cur) and self._expanded(cur)
 
     def _crash_guard(self, pid_before, pid_after):
-        self._disabled = True
+        # 写类属性：实例上赋值只会遮蔽本实例，新的 ModOverlay 实例又会看到 False
+        ModOverlay._disabled = True
         logger.critical(
             f'ModOverlay: 调起悬浮窗后游戏进程消失/重启（pid {pid_before!r} -> {pid_after!r}）。'
             f'本进程内永久停用 overlay 后端，改用 prefs 降级。'

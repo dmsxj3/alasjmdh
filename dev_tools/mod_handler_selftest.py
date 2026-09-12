@@ -169,6 +169,25 @@ tpl_keys = set(tpl['ModHandler']['ModHandler'].keys())
 check('template.json 与 argument.yaml 参数集合一致', yaml_keys == tpl_keys,
       f'差异={sorted(yaml_keys ^ tpl_keys)}')
 
+
+def _norm(value):
+    """None 与 '' 视为等价空值（yaml 用空串、template.json 用 null 表达「未配」）。"""
+    return '' if value is None else value
+
+
+# 防回归（真踩过）：template.json 曾把 OverlayFallbackPrefs 留成 true，
+# 而 argument.yaml 已改 false —— 新建实例会拿到与声明相反的默认值。
+# 集合一致比不出取值差异，这里逐参数比对默认值。
+_value_drift = [
+    f'{k}: tpl={_norm(default_of(tpl["ModHandler"]["ModHandler"].get(k)))!r} '
+    f'yaml={_norm(default_of(yaml_mod.get(k)))!r}'
+    for k in sorted(yaml_keys & tpl_keys)
+    if _norm(default_of(tpl['ModHandler']['ModHandler'].get(k)))
+    != _norm(default_of(yaml_mod.get(k)))
+]
+check('template.json 与 argument.yaml 默认值无漂移', not _value_drift,
+      f'漂移={_value_drift}')
+
 for lang in ['zh-CN', 'en-US', 'ja-JP', 'zh-TW']:
     path = os.path.join(ROOT, 'module', 'config', 'i18n', f'{lang}.json')
     with open(path, encoding='utf-8') as f:
@@ -384,26 +403,30 @@ h._last_want = False
 changed = h.check_then_set('exercise', force=True)
 check('force=True 时即使状态一致也执行', changed and h._applied == [False])
 
-# 4.10 启动纠偏
+# 4.10 启动检查只告警、不写设备（动作交给随后的任务决策）
 h, cfg, dev = new_handler()
 h.set_state(False)                       # 上次决定：关
 h.read_backend_state = lambda: True      # 用户手动开回来了
 changed = h.check_on_startup()
-check('启动纠偏：外部开启被关回', changed and h._applied == [False], f'applied={h._applied}')
+check('启动检查发现外部改动只告警、不写设备', changed is False and h._applied == [],
+      f'changed={changed} applied={h._applied}')
+# 紧接着的敏感任务按策略把倍率关掉（真正的动作只发生一次）
+h.check_then_set('exercise')
+check('外部开启被随后的敏感任务关掉', h._applied == [False], f'applied={h._applied}')
 
 h, cfg, dev = new_handler()
 h.set_state(True)
 h.read_backend_state = lambda: True
 h._applied.clear()
 changed = h.check_on_startup()
-check('启动纠偏：状态一致时不动作', changed is False and h._applied == [])
+check('启动检查：状态一致时不动作', changed is False and h._applied == [])
 
 h, cfg, dev = new_handler()
 h.set_state(False)
 h.read_backend_state = lambda: None      # 读不到设备
 h._applied.clear()
 changed = h.check_on_startup()
-check('启动纠偏：读不到设备时不动', changed is False and h._applied == [])
+check('启动检查：读不到设备时不动', changed is False and h._applied == [])
 
 # 4.11 状态落盘 / 读回
 h, cfg, dev = new_handler(config_name='selftest_cfg')
@@ -449,6 +472,69 @@ h.read_backend_state = lambda: None
 changed = h.check_then_set('exercise')
 check('后端未改动时 check_then_set 返回 False', changed is False)
 
+# 4.15b 敏感任务关倍率失败、设备确认还开着 -> 停机推送（RequestHumanTakeover）
+h, cfg, dev = new_handler()
+h.set_multiplier = lambda mode: False
+h.read_backend_state = lambda: True        # 设备上倍率确实还开着
+try:
+    h.check_then_set('exercise')
+    check('敏感任务关失败时抛 RequestHumanTakeover', False, '没有抛异常')
+except mh.RequestHumanTakeover as e:
+    check('敏感任务关失败时抛 RequestHumanTakeover', 'exercise' in str(e), str(e))
+check('停机前不落盘「已关」的决定（不谎报）', h.get_state() is not True)
+
+# 设备读不到状态时保守处理：只上报失败，不武断停机
+h, cfg, dev = new_handler()
+h.set_multiplier = lambda mode: False
+h.read_backend_state = lambda: None
+changed = h.check_then_set('exercise')
+check('设备状态读不到时不停机、返回 False', changed is False)
+
+# 常规任务开倍率失败也不停机（开了没开成只是少收益，不是封号风险）
+h, cfg, dev = new_handler()
+h.set_state(False)
+h.set_multiplier = lambda mode: False
+h.read_backend_state = lambda: False
+changed = h.check_then_set('main')
+check('常规任务开失败不停机、返回 False', changed is False)
+
+# 4.15c 停机只针对「真敏感任务」。
+# 防回归：GROUP_ALWAYS_OFF 的 minigame（只是「倍率无意义」，不是封号风险）
+# 和未列出任务（want_on 来自缓存）关失败时，绝不能把整个实例停掉。
+check('minigame 不在真敏感任务集合里', 'minigame' not in mh.sensitive_tasks())
+check('_is_sensitive_task: exercise 为真', new_handler()[0]._is_sensitive_task('exercise'))
+check('_is_sensitive_task: minigame 为假', not new_handler()[0]._is_sensitive_task('minigame'))
+
+for _task, _label in (('minigame', '小游戏'), ('commission', '未列出任务')):
+    h, cfg, dev = new_handler()
+    h.set_state(False)                     # 缓存：上次决定是关
+    h.set_multiplier = lambda mode: False
+    h.read_backend_state = lambda: True    # 设备上倍率确实还开着
+    try:
+        changed = h.check_then_set(_task)
+        check(f'{_label}({_task}) 关失败不停机、返回 False', changed is False)
+    except mh.RequestHumanTakeover:
+        check(f'{_label}({_task}) 关失败不停机、返回 False', False, '被误判成敏感任务停机')
+
+# 4.15d Enabled=False 的强制关闭分支同样只对真敏感任务停机
+h, cfg, dev = new_handler(Enabled=False)
+h.set_multiplier = lambda mode: False
+h.read_backend_state = lambda: True
+try:
+    h.check_then_set('exercise')
+    check('Enabled=False 强制关失败时抛 RequestHumanTakeover', False, '没有抛异常')
+except mh.RequestHumanTakeover:
+    check('Enabled=False 强制关失败时抛 RequestHumanTakeover', True)
+
+h, cfg, dev = new_handler(Enabled=False)
+h.set_multiplier = lambda mode: False
+h.read_backend_state = lambda: True
+try:
+    h.check_then_set('minigame')
+    check('Enabled=False 下 minigame 关失败也不停机', True)
+except mh.RequestHumanTakeover:
+    check('Enabled=False 下 minigame 关失败也不停机', False, '被误判成敏感任务停机')
+
 # 4.16 显式传入 device 时必须保留它（曾经被无条件覆盖成 None，
 #      导致所有 adb 操作都对 None 设备执行）
 _dev = FakeDevice()
@@ -489,6 +575,8 @@ check('钩子在 Start task 之前',
       alas_src.index('check_then_set') < alas_src.index('Scheduler: Start task'))
 check('钩子被 try/except 包住，失败不拖垮调度',
       'failed to apply multiplier policy' in alas_src)
+check('钩子放行 RequestHumanTakeover（敏感关失败必须停机，不能被 except 吞掉）',
+      'except RequestHumanTakeover' in alas_src)
 
 # 防回归：webui app.py 的结构。曾经因为编辑失误把 set_group 的
 # @use_scope("groups") 装饰器吃掉、同时丢掉 refresh_mod_handler_state 调用，

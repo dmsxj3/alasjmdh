@@ -1,5 +1,5 @@
 """
-mod_handler 一键自检 —— 依次跑策略、prefs、ui 三个自检脚本。
+mod_handler 一键自检 —— 依次跑策略、prefs、ui、overlay 四个后端自检与端到端。
 
 用法（项目根目录）：
     toolkit\\python.exe dev_tools/mod_handler_test.py
@@ -20,6 +20,7 @@ SUITES = [
     ('策略 / 状态机', 'mod_handler_selftest.py'),
     ('prefs 后端  ', 'mod_prefs_selftest.py'),
     ('ui 后端     ', 'mod_ui_selftest.py'),
+    ('overlay 后端', 'mod_overlay_selftest.py'),
     ('端到端      ', 'mod_handler_e2e.py'),
 ]
 

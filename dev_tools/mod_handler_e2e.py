@@ -212,7 +212,7 @@ for camel, snake, want_on, should_write in SEQUENCE:
 eq('最终设备状态', dev.multiplier_on, True)
 
 # ---------------------------------------------------------------- 5
-checker.header('5. 启动纠偏（模拟「用户手动开回倍率」）')
+checker.header('5. 启动检查（模拟「用户手动开回倍率」）')
 h, cfg, dev = build('e2e_startup')
 h.check_then_set('exercise')                 # 停在敏感任务：倍率关
 check('执行后设备倍率关闭', dev.multiplier_on is False)
@@ -221,14 +221,20 @@ check('执行后设备倍率关闭', dev.multiplier_on is False)
 dev.xml = ModPrefs.build_xml(dev.xml, {'1': 1000, '2': 1000, '3': 1000, '22': True})
 check('用户手动开启后设备倍率开着', dev.multiplier_on is True)
 
-# 假设 ALAS 重启并直接跑常规任务：没有纠偏的话会一直开着倍率
+# 假设 ALAS 重启：启动检查只告警、不写设备，真正的动作交给下一个任务
 h2, cfg2, dev2 = build('e2e_startup', xml=dev.xml)
 eq('新进程读到的缓存', h2.get_state(), False)
 dev2.calls.clear()
 changed = h2.check_on_startup()
-check('启动纠偏把倍率关回', changed is True and dev2.multiplier_on is False,
-      f'writes={dev2.writes}')
-check('纠偏同样走完整流程（停游戏 -> 推送 -> 保持关闭）',
+check('启动检查发现外部改动只告警、不写设备',
+      changed is False and dev2.writes == [], f'writes={dev2.writes}')
+check('设备保持用户改动后的状态', dev2.multiplier_on is True)
+
+# 下一个任务是敏感任务：按策略把倍率关掉，只写这一次
+changed = h2.check_then_set('exercise')
+check('敏感任务把倍率关回（只写一次）',
+      changed is True and dev2.multiplier_on is False, f'writes={dev2.writes}')
+check('完整流程：停游戏 -> 推送 -> 保持关闭',
       dev2.writes == ['app_stop', f'adb_push:{TMP_REMOTE}'], str(dev2.writes))
 
 # ---------------------------------------------------------------- 6

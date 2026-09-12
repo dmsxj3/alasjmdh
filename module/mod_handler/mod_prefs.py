@@ -278,125 +278,6 @@ class ModPrefs(ModuleBase):
         quoted = _shell_quote(cmd)
         return self.device.adb_shell(f'su -c {quoted}', timeout=timeout)
 
-    # ------------------------------------------------------------ 只读通道（不依赖 Device）
-    @staticmethod
-    def find_adb():
-        """找 adb 可执行文件：优先项目自带，其次 PATH 里的。"""
-        for candidate in ('./bin/adb/adb.exe' if os.name == 'nt' else './bin/adb/adb',
-                          './toolkit/Lib/site-packages/adbutils/binaries/adb.exe',
-                          './toolkit/lib/site-packages/adbutils/binaries/adb.exe',
-                          '/usr/bin/adb'):
-            if os.path.exists(candidate):
-                return candidate
-        return 'adb'
-
-    def adb_su(self, cmd, serial=None, timeout=30):
-        """
-        绕过 Device、直接用 adb 执行远端 root 命令（只读诊断用）。
-
-        为什么需要它：webui 进程把 PIL 换成了假模块，构造 Device 会因
-        `cannot import name 'ImageDraw' from 'PIL'` 失败。而读配置只需要
-        `adb shell su -c cat`，没必要把整个截图/控制栈拉进来。
-        写成这一层后，GUI 在没有 Device 的情况下也能读到真实状态。
-
-        注意：只能用于读操作。写 prefs 必须走 Device（要停/启游戏）。
-        """
-        import subprocess
-
-        serial = serial or str(deep_get(self.config.data, 'Alas.Emulator.Serial',
-                                        default='') or '')
-        argv = [self.find_adb()]
-        if serial and serial != 'auto':
-            argv += ['-s', serial]
-        # 整条远端命令必须作为「一个」参数交给 su -c，否则 su 会误吃 -c/-f 之类的选项
-        argv += ['shell', f'su -c {_shell_quote(cmd)}']
-        result = subprocess.run(argv, capture_output=True, timeout=timeout)
-        return result.stdout.decode('utf-8', 'replace')
-
-    def read_raw_via_adb(self, serial=None):
-        """不依赖 Device 地读取 prefs 原文，失败返回 None。"""
-        try:
-            out = self.adb_su(f'cat {self.remote_path}', serial=serial)
-        except Exception as e:
-            logger.warning(f'ModPrefs: adb 读取失败: {type(e).__name__}: {e}')
-            return None
-        if '<map' not in out:
-            logger.warning(f'ModPrefs: adb 读到的内容不是 prefs: {out[:120]!r}')
-            return None
-        return out
-
-    def read_only_describe_state(self, serial=None):
-        """
-        纯只读地判断当前倍率状态，供 GUI 状态栏使用（不需要 Device / root 检查走 adb）。
-
-        Returns:
-            dict: 与 describe_state() 同构
-        """
-        off, on = self.off_keys, self.on_keys
-        if not off and not on:
-            return {'option': 'unconfigured',
-                    'detail': 'OffKeys / OnKeys 未配置，请先用 dev_tools/mod_discover.py 发现 key 映射'}
-
-        # 先用配置里的 serial；读不到就在线设备里挨个试
-        raw = None
-        tried = []
-        for candidate in self._candidate_serials(serial):
-            tried.append(candidate or '(配置里的 serial)')
-            raw = self.read_raw_via_adb(serial=candidate)
-            if raw is not None:
-                break
-        if raw is None:
-            return {'option': 'unknown',
-                    'detail': f'读不到 {self.remote_path}；已尝试 {tried}。'
-                              f'请确认设备在线（adb connect）、包名 / PrefsFile 是否正确'}
-        try:
-            parsed = self.parse(raw)
-        except Exception as e:
-            return {'option': 'unknown', 'detail': f'解析失败: {e}'}
-        if off and self._match(parsed, off):
-            return {'option': 'off', 'detail': self._keys_detail(parsed, off)}
-        if on and self._match(parsed, on):
-            return {'option': 'on', 'detail': self._keys_detail(parsed, on)}
-        want = dict(off)
-        if on:
-            want.update(on)
-        return {'option': 'unknown',
-                'detail': '开关当前值不在 OffKeys/OnKeys 任一目标状态上: '
-                          + self._keys_detail(parsed, want)}
-
-    def _candidate_serials(self, serial=None):
-        """
-        候选设备列表：显式 serial -> 配置里的 serial -> adb devices 里所有在线设备。
-
-        为什么要逐个试：ALAS 的 Emulator_Serial 有时写成 'auto' 或用了别名，
-        而 adb 里可能有真机 + 模拟器多个设备（真机通常没有 root）。
-        """
-        import subprocess
-
-        out = []
-        if serial:
-            out.append(serial)
-        cfg_serial = str(deep_get(self.config.data, 'Alas.Emulator.Serial', default='') or '')
-        if cfg_serial and cfg_serial != 'auto':
-            out.append(cfg_serial)
-        out.append('(all)')
-        try:
-            result = subprocess.run([self.find_adb(), 'devices'], capture_output=True, timeout=15)
-            devices = []
-            for line in result.stdout.decode('utf-8', 'replace').splitlines()[1:]:
-                parts = line.split()
-                if len(parts) >= 2 and parts[1] == 'device':
-                    devices.append(parts[0])
-        except Exception:
-            devices = []
-        # 去重并保持顺序
-        seen = []
-        for item in out:
-            for d in (devices if item == '(all)' else [item]):
-                if d not in seen:
-                    seen.append(d)
-        return seen
-
     def check_root(self):
         """返回 True 表示 su 可用。"""
         try:
@@ -550,8 +431,8 @@ class ModPrefs(ModuleBase):
         Args:
             mode: True = 启用倍率（恢复正常），False = 关闭倍率
         Returns:
-            bool: 回读校验确认达成目标状态时为 True；
-                  已是目标状态、或校验未通过时为 False；写入失败时抛异常。
+            bool: 已是目标状态（视为已达成）或回读校验确认生效时为 True；
+                  校验未通过时为 False；写入失败时抛异常。
         """
         changes = self.on_keys if mode else self.off_keys
         if not changes:
@@ -577,7 +458,9 @@ class ModPrefs(ModuleBase):
                 todo[str(k)] = v
         if not todo:
             logger.info(f'ModPrefs: already at target state ({changes}), skip')
-            return False
+            # 幂等 = 已达成目标，返回 True。三个后端语义一致：
+            # False 只留给「尝试过但没达成」，调用方据此区分正常跳过与真失败。
+            return True
 
         logger.info(f'ModPrefs: applying {todo} -> {"ON" if mode else "OFF"}')
 
