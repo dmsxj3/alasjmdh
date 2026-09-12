@@ -22,6 +22,7 @@ import json
 import os
 
 from module.config.deep import deep_get
+from module.exception import RequestHumanTakeover
 from module.logger import logger
 
 
@@ -36,7 +37,7 @@ class _ModuleBaseStub:
 try:
     # module/base/base.py 第 1 行 -> module.base.button -> `from PIL import ImageDraw`。
     # webui 进程把 PIL 换成了假模块（只有 PIL.Image.Image），这里会 ImportError。
-    # read_only_describe_state 只需要下面这些纯函数，所以降级即可，不影响只读展示。
+    # 只读展示路径只需要下面这些纯函数，所以降级即可，不影响只读展示。
     from module.base.base import ModuleBase
 except ImportError:  # pragma: no cover - 取决于运行环境
     ModuleBase = _ModuleBaseStub
@@ -443,12 +444,45 @@ class ModHandler(ModuleBase):
         Args:
             mode: True = 开倍率，False = 关倍率
         Returns:
-            bool: 后端是否确认达成目标状态（没配 key、已是目标状态或校验失败时为 False）
+            bool: 后端是否确认达成目标状态（没配 key、或回读校验未通过时为 False）
         """
         result = self._backend.set_multiplier(mode)
         if result:
             logger.attr('ModHandler', f'multiplier {"ON" if mode else "OFF"}')
         return bool(result)
+
+    def _is_sensitive_task(self, task):
+        """
+        该任务是否属于策略里的「真敏感任务」（演习 / META / 共斗）。
+
+        注意不能直接用 `task in disabled`：resolve_policy 的关闭列表里还混着
+        GROUP_ALWAYS_OFF（minigame，只是「倍率无意义且会干扰」，不是封号风险）。
+        停机升级只对真敏感任务生效，否则小游戏关不掉倍率也会把整个实例停掉。
+        """
+        return task in sensitive_tasks(self.sensitive_option)
+
+    def _critical_shutdown(self, task):
+        """
+        敏感任务关倍率失败、且设备确认倍率仍开着 —— 带着倍率进敏感任务
+        等同封号风险。推送通知后抛 RequestHumanTakeover 停止本实例，
+        交人工处理；绝不能带着「以为关了其实没关」的状态继续跑任务。
+        """
+        logger.hr('ModHandler', level=1)
+        logger.critical(
+            f'ModHandler: 敏感任务 `{task}` 关倍率失败，设备上倍率仍开着 —— '
+            f'带倍率进敏感任务等同封号风险，停止 Alas 交人工处理')
+        try:
+            # 延迟导入：notify -> onepush，个别测试环境可能没有
+            from module.notify import handle_notify
+            handle_notify(
+                getattr(self.config, 'Error_OnePushConfig', '') or '',
+                title=f'Alas <{getattr(self.config, "config_name", "alas")}> 倍率控制失败',
+                content=f'敏感任务 `{task}` 关倍率失败，倍率仍开启，已停止调度',
+            )
+        except Exception as e:
+            logger.warning(f'ModHandler: notify failed: {e}')
+        raise RequestHumanTakeover(
+            f'ModHandler: sensitive task `{task}` failed to turn multiplier off')
 
     # ------------------------------------------------------------ 主逻辑
     def check_then_set(self, task, force=False):
@@ -478,6 +512,9 @@ class ModHandler(ModuleBase):
                 logger.hr('ModHandler', level=1)
                 logger.warning('ModHandler 已关闭，但检测到敏感任务里倍率仍开着，强制关闭')
                 changed = self.set_multiplier(False)
+                if not changed and self._is_sensitive_task(task) \
+                        and self.read_backend_state() is True:
+                    self._critical_shutdown(task)
                 self.set_state(False)
                 return changed
             return False
@@ -543,6 +580,13 @@ class ModHandler(ModuleBase):
 
         changed = self.set_multiplier(want_on)
         if not changed:
+            # 后端返回 False 只剩「尝试过但没达成」（幂等已由后端返回 True 表达）。
+            # 敏感任务没关掉且设备确认倍率仍开着 = 封号风险，直接停机推送。
+            # 只对真敏感任务升级：minigame 与未列出任务（want_on 来自缓存）
+            # 关失败不值得停掉整个实例，交给下一个敏感任务再兜。
+            if want_on is False and self._is_sensitive_task(task) \
+                    and self.read_backend_state() is True:
+                self._critical_shutdown(task)
             logger.warning(f'ModHandler: 后端没有改动任何开关（task `{task}`，'
                            f'target {"ON" if want_on else "OFF"}）')
         self._last_want = want_on
@@ -551,15 +595,19 @@ class ModHandler(ModuleBase):
 
     def check_on_startup(self):
         """
-        调度器启动时的安全兜底。
+        调度器启动时的安全检查（只检测、不写设备）。
 
-        场景：上一次 ALAS 退出时停在敏感任务（倍率已关），用户手动把倍率开回去，
-        而这次的第一个任务恰好是非敏感任务 —— 那会一直开着倍率跑到下一个敏感任务。
-        这里读回设备真实状态，只要与「上次明确的决定」不一致就立刻纠偏一次。
-        真正的开关策略仍由随后的 check_then_set 按任务决定。
+        发现设备状态与「上次明确的决定」不一致时只告警；真正的动作交给
+        随后的 check_then_set 按第一个任务的策略执行：
+          - 第一个任务是敏感任务 -> 关掉（只写一次）
+          - 第一个任务是常规任务 -> 开回来（只写一次）
+          - 未列出的任务 -> 沿用上次决定，设备与决定不符时同样会被纠正
+        旧版在这里直接按缓存纠偏写设备：缓存陈旧时会出现
+        「纠偏开回来 -> 下一个敏感任务又关掉」的双写，还多停一次游戏；
+        用户手动改过倍率时也会被旧缓存顶掉。
 
         Returns:
-            bool: 本次是否对倍率做了变更
+            bool: 恒为 False（本方法不再改动设备，返回值仅为兼容旧调用方）
         """
         if not self.enabled:
             return False
@@ -579,13 +627,11 @@ class ModHandler(ModuleBase):
             logger.attr('ModHandler', f'startup check: multiplier already {"ON" if want_on else "OFF"}')
             return False
 
-        wanted = f'{"ON" if want_on else "OFF"}'
         logger.hr('ModHandler', level=1)
         logger.warning(f'ModHandler: 悬浮窗倍率被外部改动（当前 {"ON" if current else "OFF"}，'
-                       f'上次决定 {wanted}），按上次决定纠偏')
-        changed = self.set_multiplier(want_on)
-        self.set_state(want_on)
-        return changed
+                       f'上次决定 {"ON" if want_on else "OFF"}），'
+                       f'等待下一个任务的策略处理')
+        return False
 
     # ------------------------------------------------------------ 自检
     def diagnose(self):

@@ -592,6 +592,9 @@ class AzurLaneAutoScript:
                     mod.check_on_startup()
                     startup_checked = True
                 mod.check_then_set(inflection.underscore(task))
+            except RequestHumanTakeover:
+                # 敏感任务关倍率失败等致命情况：停止本实例，交人工处理
+                raise
             except Exception as e:
                 # 控制失败不应该拖垮整个调度，记录后继续跑任务
                 logger.warning(f'ModHandler: failed to apply multiplier policy: {e}')
