@@ -416,4 +416,65 @@ check('总预算是个有限的秒数（否则重试路径会累积成十几分�
       isinstance(ModOverlay.WAIT_GONE_BUDGET, int) and ModOverlay.WAIT_GONE_BUDGET <= 60,
       f'WAIT_GONE_BUDGET={ModOverlay.WAIT_GONE_BUDGET}')
 
+# ---------------------------------------------------------------- 11. 游戏未运行
+checker.header('11. 游戏未运行（模拟器开着、游戏还没起来）-> 直接写 prefs')
+# 用户实际踩到的场景：实例刚启动，第一个任务走到 check_then_set，但游戏还没起来。
+# 旧行为：硬走悬浮窗 -> show() 拒绝（am startservice 会新起进程把游戏搞崩）
+#   -> OverlayFallbackPrefs 默认关 -> 返回 False
+#   -> ModHandler 回读确认「倍率还开着」-> 停机，实例一启动就自己停掉。
+# 修法：游戏没在跑时直接写 prefs —— 没有运行中的进程会覆盖，零重启代价。
+og, cfgg, devg = make_overlay(OverlayFallbackPrefs=False)   # 关键：降级开关是关的
+set_device_xml(og, xml_of(**{'1': 1000, '2': 1000, '3': 1000}))
+devg.running = False                                        # 游戏没在跑
+devg.calls.clear()
+eq('游戏未运行 + 降级开关关闭 -> 仍然写 prefs 并成功', og.set_multiplier(False), True)
+eq('游戏未运行时不碰悬浮窗 Service',
+   [c for c in devg.calls if 'service' in c], [])
+eq('游戏未运行时不点击 / 不拖拽',
+   [c for c in devg.calls if 'input tap' in c or 'input swipe' in c], [])
+check('游戏未运行时确实推送了新的 XML',
+      any(c.startswith('adb_push:') for c in devg.calls), str(devg.calls))
+eq('游戏未运行时设备上的倍率已关', og.get_state(), False)
+
+# 反向：游戏在跑时仍优先走悬浮窗，不能因为这次改动把正常路径也改成写 prefs
+og3, cfgg3, devg3 = make_overlay(OverlayFallbackPrefs=False)
+set_device_xml(og3, xml_of(**{'1': 1000, '2': 1000, '3': 1000}))
+devg3.running = True
+devg3.windows_dump = ''                 # 窗口不出现 -> 悬浮窗路径失败
+og3._prefs = StubPrefs(result=True)
+og3.show = lambda *a, **k: False        # 跳过 10s 超时，直接失败
+eq('游戏在跑时悬浮窗失败且未开降级 -> 返回 False', og3.set_multiplier(False), False)
+eq('游戏在跑时不会绕过降级开关去写 prefs', og3._prefs.calls, [])
+
+# 游戏未运行时 prefs 也写不进去：如实返回 False，交给 ModHandler 判断是否停机
+og2, cfgg2, devg2 = make_overlay(OverlayFallbackPrefs=False)
+set_device_xml(og2, xml_of(**{'1': 1000, '2': 1000, '3': 1000}))
+devg2.running = False
+devg2.fail_command = 'cp /data/local/tmp/_alas_mod_prefs.xml'
+eq('游戏未运行时 prefs 写入失败 -> 返回 False', og2.set_multiplier(False), False)
+
+# 例外中的例外：Alas.Error.HandleError=False 时 prefs 与 app_stop 互斥，
+# 但「游戏本来就没在跑」没有 app_stop 可调用，所以互斥判定不能拦这条路 ——
+# 否则 HandleError=False 的用户在冷启动时仍会被停机（同一个 bug 换个配置复现）。
+og4, cfgg4, devg4 = make_overlay(OverlayFallbackPrefs=False, Error_HandleError=False)
+set_device_xml(og4, xml_of(**{'1': 1000, '2': 1000, '3': 1000}))
+devg4.running = False
+devg4.calls.clear()
+eq('游戏未运行 + HandleError 关闭 -> 仍然写 prefs 并成功',
+   og4.set_multiplier(False), True)
+eq('游戏未运行 + HandleError 关闭 -> 不调用 app_stop',
+   [c for c in devg4.calls if c == 'app_stop'], [])
+eq('游戏未运行 + HandleError 关闭 -> 设备上的倍率已关', og4.get_state(), False)
+
+# 反向：游戏在跑 + HandleError=False + 开了降级 -> prefs 必须拒绝（互斥仍然成立），
+# 由 _apply_via_prefs 把异常吞成 False，交给 ModHandler 决定停机。
+og5, cfgg5, devg5 = make_overlay(OverlayFallbackPrefs=True, Error_HandleError=False)
+set_device_xml(og5, xml_of(**{'1': 1000, '2': 1000, '3': 1000}))
+devg5.running = True
+og5.show = lambda *a, **k: False
+eq('游戏在跑 + HandleError 关闭 -> prefs 拒绝写入，返回 False',
+   og5.set_multiplier(False), False)
+eq('游戏在跑 + HandleError 关闭 -> 不会偷偷强停游戏',
+   [c for c in devg5.calls if c == 'app_stop'], [])
+
 sys.exit(checker.summary())

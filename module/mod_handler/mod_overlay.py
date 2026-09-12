@@ -51,6 +51,11 @@ ModOverlay — 悬浮窗直点后端（零重启）。
 失败兜底：调不起悬浮窗、坐标对不上、或核对不通过时，按 `OverlayFallbackPrefs`
 （默认关，打开后生效）降级到 ModPrefs（写 XML + 重启游戏）。宁可多一次重启，
 也不能让敏感任务带着倍率跑 —— 那正是这个功能要防的封号风险。
+
+例外：**游戏进程本来就没在跑时不需要这个开关**。那时写 prefs 既不用停游戏也不会
+被内存副本覆盖，代价为零，所以无条件走 prefs（见 set_multiplier）。实例刚启动、
+模拟器开着但游戏还没起来就属于这种情况 —— 旧行为在这里会「关倍率失败」，
+进而触发停机，实例一启动就自己停掉。
 """
 import re
 import time
@@ -753,6 +758,13 @@ class ModOverlay(ModuleBase):
         """
         把倍率切到目标状态，全程不重启游戏。
 
+        三条路径，按优先级：
+          1. 已经是目标状态 -> 直接返回 True，不碰设备；
+          2. **游戏没在跑** -> 直接写 prefs（写 XML）。此刻不需要停游戏、不需要重启，
+             游戏下次启动就读到新值 —— 实例刚启动、游戏还没起来时走的就是这条；
+          3. 游戏在跑 -> 调起悬浮窗点滑块/开关；失败且开了 OverlayFallbackPrefs
+             才降级到 prefs（那条路要停游戏，代价是一次重启）。
+
         Args:
             mode: True = 开倍率（OnKeys），False = 关倍率（OffKeys）
         Returns:
@@ -776,6 +788,25 @@ class ModOverlay(ModuleBase):
             self._write_survival()
         except Exception:
             pass
+
+        # ★ 游戏没在跑：直接写 prefs，不要碰悬浮窗。
+        #
+        # 为什么必须在这里分叉：实例刚启动、模拟器开着但游戏还没起来时，第一个任务
+        # 就会走到这里。此时
+        #   - 悬浮窗点不到（show() 会拒绝：am startservice 在进程不存在时会新起一个
+        #     进程，那里游戏原生库还没初始化，Menu.Icon() 直接 UnsatisfiedLinkError
+        #     把游戏搞崩）；
+        #   - 但 prefs 读得到、也写得了 —— 而且此刻是写 prefs 的最佳时机：没有运行中
+        #     的进程会把内存副本覆盖回来，所以既不用停游戏、也不用重启，代价为零，
+        #     游戏下次启动就读到新值。
+        # 旧行为是硬走悬浮窗、失败后因为 OverlayFallbackPrefs 默认关而放弃，于是
+        # 「关倍率失败 + 回读确认仍开着」触发了停机 —— 实例一启动就自己停掉。
+        #
+        # 这一步**不受 OverlayFallbackPrefs 约束**：那个开关管的是
+        # 「overlay 失败后愿不愿意付一次游戏重启的代价」，而这里根本没有重启代价。
+        if not self._game_running():
+            return self._apply_via_prefs(
+                mode, '游戏未运行 —— 直接写 prefs（无需停游戏、零重启代价，下次启动生效）')
 
         int_keys = sorted(k for k, v in target.items() if not isinstance(v, bool))
         bool_keys = [k for k, v in target.items() if isinstance(v, bool)]
@@ -811,22 +842,32 @@ class ModOverlay(ModuleBase):
         if not ok:
             logger.warning('ModOverlay: 悬浮窗方式未能确认生效')
             if self.fallback_enabled:
-                logger.warning('ModOverlay: 降级到 prefs（需要重启游戏才生效）')
-                try:
-                    # 走 prefs_reader 复用实例：既省一次构造，也让降级链路可被
-                    # 自检脚本用桩替换（dev_tools/mod_overlay_selftest.py）
-                    changed = self.prefs_reader.set_multiplier(mode)
-                    return bool(changed)
-                except Exception as e:
-                    logger.error(f'ModOverlay: prefs 降级也失败: {type(e).__name__}: {e}')
-                finally:
-                    # 降级路径改了 XML，缓存必须失效
-                    self._invalidate_prefs()
-            else:
-                logger.critical('ModOverlay: 未生效且已关闭降级，'
-                                '敏感任务可能带着倍率开打，请立刻检查！')
+                return self._apply_via_prefs(mode, '降级到 prefs（需要重启游戏才生效）')
+            logger.critical('ModOverlay: 未生效且已关闭降级，'
+                            '敏感任务可能带着倍率开打，请立刻检查！')
             return False
         return True
+
+    def _apply_via_prefs(self, mode, reason):
+        """
+        走 prefs 后端写 XML。调用方用 reason 说明为什么走这条路（日志用）。
+
+        复用 self.prefs_reader 实例：既省一次构造，也让这条链路可被自检脚本
+        用桩替换（dev_tools/mod_overlay_selftest.py）。
+
+        Returns:
+            bool: prefs 后端是否确认写入生效
+        """
+        logger.warning(f'ModOverlay: {reason}')
+        try:
+            changed = self.prefs_reader.set_multiplier(mode)
+            return bool(changed)
+        except Exception as e:
+            logger.error(f'ModOverlay: prefs 写入失败: {type(e).__name__}: {e}')
+            return False
+        finally:
+            # 走了 prefs 就一定有写入尝试，缓存必须失效
+            self._invalidate_prefs()
 
     def _pending(self, target, int_keys, bool_keys):
         """按设备真实状态算出还差哪些键没达成。"""

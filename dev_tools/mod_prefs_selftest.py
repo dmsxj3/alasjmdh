@@ -10,7 +10,8 @@ ModPrefs 自检 —— XML 读写逻辑 + set_multiplier 的完整编排（假�
   5. root 不可用 / 读不到 prefs / OffKeys 为空 时的行为
   6. get_state 的三态判定与「用户手动改动」识别
   7. 写入后回读校验失败必须如实返回 False（不谎报成功）
-  8. Alas.Error.HandleError 关闭时停游戏退化为 am force-stop
+  8. Alas.Error.HandleError 关闭时拒绝停游戏（不再用 adb 强停绕过）；
+     但「游戏本来就没在跑」时互斥不适用 —— 没有 app_stop 要调，冷启动必须能写
 
 真实设备只读验证在 dev_tools/mod_handler_doctor.py，那里会用你的模拟器实测。
 """
@@ -245,6 +246,18 @@ check('HandleError 关闭时完全不碰游戏启停',
       'app_stop' not in dev.calls and 'app_start' not in dev.calls
       and not any('force-stop' in c for c in dev.calls), str(dev.calls))
 eq('HandleError 关闭时也没动过 prefs', parse(dev.xml)['1'], ('int', '1000'))
+
+# 2.9c 但「游戏本来就没在跑」时这套互斥不成立：没有 app_stop 可调用，也就不需要
+# HandleError 的许可。冷启动（模拟器开着、游戏还没起来）必须能写进 prefs，
+# 否则这类用户会以另一种配置复现同一个「实例一启动就自己停掉」。
+p, cfg, dev = make_prefs(Error_HandleError=False)
+dev.running = False
+eq('HandleError 关闭 + 游戏未运行 -> 照样写 prefs 成功', p.set_multiplier(False), True)
+eq('HandleError 关闭 + 游戏未运行 -> 不碰游戏启停',
+   [c for c in dev.calls if c in ('app_stop', 'app_start')], [])
+eq('HandleError 关闭 + 游戏未运行 -> 设备上的值确实改了',
+   (parse(dev.xml)['1'], parse(dev.xml)['2'], parse(dev.xml)['3']),
+   (('int', '1'), ('int', '1'), ('int', '1')))
 
 # 2.9b 其它原因导致 app_stop 失败时如实向上抛，不掩盖
 p, cfg, dev = make_prefs()

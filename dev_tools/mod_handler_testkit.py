@@ -124,9 +124,14 @@ class FakeConfig:
             'UiOnLabels': '',
             'UiTapPoints': '',
             'UiWaitTimeout': 5,
+            # Alas.Error.HandleError。它不是 ModHandler 组里的值，ModPrefs 读的是
+            # self.config.Error_HandleError（module/config/config_generated.py），
+            # 所以单独放在属性上，不塞进 data。测试里直接 cfg.Error_HandleError = False。
+            'Error_HandleError': True,
         }
         values.update(mod_values)
         self.config_name = config_name
+        self.Error_HandleError = values.pop('Error_HandleError')
         # 与真实 config.data 同构：任务名.参数组.参数（ModHandler 任务 / ModHandler 组）
         self.data = {'ModHandler': {'ModHandler': values, 'Storage': {'Storage': {}}}}
 

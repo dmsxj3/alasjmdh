@@ -292,5 +292,84 @@ changed = h.check_then_set('exercise')
 check('紧接演习仍能正确关闭倍率',
       changed is True and dev.multiplier_on is False, f'writes={dev.writes}')
 
+# ---------------------------------------------------------------- 10
+checker.header('10. 实例启动、游戏还没起来：第一个任务不能把实例停掉')
+# 用户实际踩到的场景：模拟器开着，游戏还没起来，实例的第一个任务就走到
+# check_then_set。Backend 用默认的 overlay（生产配置），设备上倍率是开的。
+# 旧行为：overlay 硬走悬浮窗 -> show() 拒绝（游戏没跑，am startservice 会新起
+# 进程把游戏搞崩）-> OverlayFallbackPrefs 默认关 -> 返回 False
+# -> ModHandler 回读确认「倍率还开着」-> RequestHumanTakeover，实例一启动就停。
+_cold_cfg = FakeConfig(
+    config_name='e2e_cold_start',
+    Enabled=True,
+    Backend='overlay',
+    OffKeys=OFF_KEYS,
+    OnKeys=ON_KEYS,
+    SensitiveTask='disable_all_dangerous_task',
+    OverlayFallbackPrefs=False,      # 生产默认值：降级开关是关的
+)
+_cold_dev = SimulatedDevice()        # 设备上倍率开着
+_cold_dev.running = False            # 模拟器开着，但游戏还没起来
+h10 = mh.ModHandler(config=_cold_cfg, device=_cold_dev)
+check('冷启动时后端确实是 overlay', type(h10._backend).__name__ == 'ModOverlay',
+      type(h10._backend).__name__)
+_cold_dev.calls.clear()
+try:
+    changed = h10.check_then_set('exercise')      # 第一个任务就是演习（要关倍率）
+    check('游戏未运行时第一个敏感任务不停机', True)
+except mh.RequestHumanTakeover as e:
+    check('游戏未运行时第一个敏感任务不停机', False, f'实例被停掉了: {e}')
+else:
+    check('游戏未运行时第一个敏感任务确实关掉了倍率',
+          changed is True and _cold_dev.multiplier_on is False,
+          f'changed={changed} on={_cold_dev.multiplier_on}')
+    eq('游戏未运行时不需要停游戏', [c for c in _cold_dev.calls if c.startswith('app_')], [])
+    eq('游戏未运行时完全不碰悬浮窗 Service',
+       [c for c in _cold_dev.calls if 'service' in c], [])
+    check('游戏未运行时的关闭确实落到了设备上（推送了 XML）',
+          any(c.startswith('adb_push:') for c in _cold_dev.calls), str(_cold_dev.calls))
+
+# 同一场景、但用户关掉了 Alas.Error.HandleError。prefs 后端与该配置互斥（要靠
+# app_stop 停游戏才写得安全），可冷启动时根本没有 app_stop 可调用 —— 所以互斥
+# 判定不能拦这条路，否则这类用户会以另一种配置复现同一个「一启动就停机」。
+_cold2_cfg = FakeConfig(
+    config_name='e2e_cold_start_nohandle',
+    Enabled=True,
+    Backend='overlay',
+    OffKeys=OFF_KEYS,
+    OnKeys=ON_KEYS,
+    SensitiveTask='disable_all_dangerous_task',
+    OverlayFallbackPrefs=False,
+    Error_HandleError=False,         # ★ 与 app_stop 互斥的那个配置
+)
+_cold2_dev = SimulatedDevice()
+_cold2_dev.running = False
+h10b = mh.ModHandler(config=_cold2_cfg, device=_cold2_dev)
+_cold2_dev.calls.clear()
+try:
+    changed = h10b.check_then_set('exercise')
+    check('HandleError 关闭时冷启动第一个任务也不停机', True)
+except mh.RequestHumanTakeover as e:
+    check('HandleError 关闭时冷启动第一个任务也不停机', False, f'实例被停掉了: {e}')
+else:
+    check('HandleError 关闭时倍率确实关掉了',
+          changed is True and _cold2_dev.multiplier_on is False,
+          f'changed={changed} on={_cold2_dev.multiplier_on}')
+    eq('HandleError 关闭时也压根没有 app_stop 需要调',
+       [c for c in _cold2_dev.calls if c.startswith('app_')], [])
+
+# 游戏被 ALAS 的 Restart 任务拉起来之后：若悬浮窗不可用（本进程内已被崩溃保护
+# 停用），打开 OverlayFallbackPrefs 仍能通过 prefs 写回去 —— 代价是一次游戏重启。
+# 这里把 _disabled 直接置上，等价于「悬浮窗已知不可用」，同时省掉 show() 的 10s 超时。
+_cold_cfg.set(OverlayFallbackPrefs=True)
+_cold_dev.running = True
+h10._backend._disabled = True
+_cold_dev.calls.clear()
+changed = h10.check_then_set('main')
+check('游戏起来后常规任务把倍率开回来（走 prefs 降级）',
+      changed is True and _cold_dev.multiplier_on is True, f'writes={_cold_dev.writes}')
+check('降级路径按预期停了一次游戏（这正是它要付的代价）',
+      'app_stop' in _cold_dev.calls, str(_cold_dev.calls))
+
 shutil.rmtree(STATE_TMP, ignore_errors=True)
 sys.exit(1 if checker.summary() else 0)

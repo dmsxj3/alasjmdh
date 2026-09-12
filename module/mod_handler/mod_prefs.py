@@ -584,7 +584,15 @@ class ModPrefs(ModuleBase):
         所以这种情况直接拒绝，把选择权交回用户：
         prefs 后端与 Error.HandleError=False 本质上互斥，要么换 overlay 后端
         （默认，零重启），要么打开 HandleError。
+
+        ★ 但「游戏本来就没在跑」是这套互斥的例外：没有 app_stop 可调用，
+        也就没有 app_start 需要人拉起来，代价为零。所以这个判定必须排在
+        HandleError 之前 —— 否则实例刚启动（模拟器开着、游戏还没起来）时，
+        HandleError=False 的用户会在这里抛异常，第一个任务又把实例停掉。
         """
+        if not self._is_game_running():
+            # 没在跑就不用停，也就不需要 HandleError 的许可。
+            return
         if not getattr(self.config, 'Error_HandleError', True):
             raise RuntimeError(
                 'ModPrefs 需要先停游戏才能安全写入 prefs，但 Alas.Error.HandleError '
@@ -592,8 +600,6 @@ class ModPrefs(ModuleBase):
                 'RequestHumanTakeover，强停游戏后没人能把它拉起来，任务链会在下一步崩掉。'
                 '请二选一：ModHandler.Backend 改为 overlay（默认，零重启），'
                 '或打开 Alas.Error.HandleError。')
-        if not self._is_game_running():
-            return
         logger.info('ModPrefs: stopping game, otherwise the running instance '
                     'overwrites our write when it exits')
         self.device.app_stop()
