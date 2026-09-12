@@ -19,6 +19,7 @@ mod_handler_doctor — 真机自检：确认「悬浮窗倍率控制」在当前
 key 映射（OffKeys / OnKeys）的发现流程见 dev_tools/mod_discover.py。
 """
 import argparse
+import json
 import os
 import subprocess
 import sys

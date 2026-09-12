@@ -236,19 +236,18 @@ check('无 key 时设备倍率保持原样', dev.multiplier_on is True)
 check('无 key 时 keys_configured=False', h.keys_configured is False)
 
 # ---------------------------------------------------------------- 7
-checker.header('7. 非 root 时后端不可用：如实上报、不破坏设备状态')
+checker.header('7. 非 root 时后端不可用：确认不了已关 -> 停机推送（fail-closed）')
+# ★ 语义对齐 2026-09-12 19:04（9ebb55e03）：该关没关且回读确认不了「已关」
+#   （None）或确认仍开着 -> 一律停机推送。本用例曾在语义切换时被漏改
+#   （第七轮审查 N7-2），导致一键自检的 e2e 套件长期报红。
 h, cfg, dev = build('e2e_noroot')
 dev.root = False
 dev.calls.clear()
-# 后端抛的 RuntimeError 现在被 ModHandler.set_multiplier 降级成「本次没改动」，
-# 于是「该关倍率时后端不可用」会落到关失败判定里，而不是被 alas.py 的宽
-# except 记一条 warning 就继续跑任务。
 try:
-    changed = h.check_then_set('exercise')
-    check('非 root 时如实返回「没改动」且不停机', changed is False, f'changed={changed}')
+    h.check_then_set('exercise')
+    check('非 root 确认不了倍率已关 -> 停机推送', False, '没有抛异常')
 except mh.RequestHumanTakeover:
-    check('非 root 时如实返回「没改动」且不停机', False,
-          '读不到设备状态（None）时不该武断停机')
+    check('非 root 确认不了倍率已关 -> 停机推送', True)
 check('非 root 时设备 XML 未被改动', dev.multiplier_on is True)
 eq('非 root 时未停游戏', [c for c in dev.calls if c.startswith('app_')], [])
 

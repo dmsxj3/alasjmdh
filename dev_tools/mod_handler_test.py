@@ -22,6 +22,7 @@ SUITES = [
     ('ui 后端     ', 'mod_ui_selftest.py'),
     ('overlay 后端', 'mod_overlay_selftest.py'),
     ('端到端      ', 'mod_handler_e2e.py'),
+    ('AST 静态扫描', 'mod_handler_astcheck.py'),
 ]
 
 
