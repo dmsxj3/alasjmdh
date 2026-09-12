@@ -182,6 +182,13 @@ def cmd_check(args):
     print(f'package          : {args.package}')
     pkgpath = adb.shell(f'pm path {args.package}').strip()
     print(f'pm path          : {pkgpath}')
+    # 哨兵检查（第九轮 N9-2，与 doctor 的 F5-2 修法对齐）：失败时 Adb.raw 返回
+    # '__ERROR__ ...'（非空）—— 不检查的话它会被当成 apk 路径送去 unzip，
+    # 最后误报「当前是原版客户端」，把 adb 连接问题说成客户端问题。
+    if pkgpath.startswith('__ERROR__'):
+        print('  [!] pm 命令失败（adb 连接/设备异常），无法确认安装状态与模组特征')
+        print('      —— 先解决 adb 连接（见上方 devices 输出）再继续')
+        return 1
 
     p = prefs_path(args.package, args.prefs_file)
     exists = adb.su(f'test -f {p} && echo YES || echo NO').strip()
@@ -298,6 +305,16 @@ def cmd_diff(args):
         print(f'ModHandler.OffKeys = {",".join(off_keys)}')
         print(f'ModHandler.OnKeys  = {",".join(on_keys)}')
         print('\n（OffKeys = 关闭倍率时写入，OnKeys = 恢复时写回）')
+        # 方向自检（第九轮 N9-3）：文档要求「快照时功能开 -> 手动关 -> diff」，
+        # 即布尔键应为 true -> false。用户若反着操作（先关后开），这两行会
+        # 静默对调 —— 打印一句方向判定，别让人拿反的配置去填。
+        bool_changes = [(o[1], n[1]) for k, (o, n) in changed.items() if o[0] == 'boolean']
+        if bool_changes and all(o.lower() == 'true' and n.lower() == 'false'
+                                for o, n in bool_changes):
+            print('（方向自检：布尔键 true -> false，与文档的「先开后关」一致）')
+        elif bool_changes:
+            print('（⚠ 方向自检：布尔键不是 true -> false —— 若你的操作是「先关后开」，'
+                  '请把上面 OffKeys / OnKeys 两行互换）')
     return 0
 
 
@@ -320,8 +337,13 @@ def _write_prefs(adb, package, prefs_file, new_xml):
             cmds.append(f'chown {uid}:{gid} {remote}')
         cmds.append(f'chmod {mode} {remote}')
         cmds.append(f'restorecon {remote}')
-        adb.su(' && '.join(cmds) + f' ; rm -f {tmp}')
-        return True
+        # 条件 echo 标记（照抄 ModPrefs.write_raw 的成熟做法，第九轮 N9-1）：
+        # 标记只在 cp/chown/chmod/restorecon 全部成功时才打印 —— 之前无条件
+        # return True，cp 实际失败时 cmd_set 仍报「[+] 已写入」，把用户引去追
+        # 错误的 key（而真实原因是写入没生效）。
+        cmds.append('echo __ALAS_DISCOVER_OK__')
+        out = adb.su(' && '.join(cmds) + f' ; rm -f {tmp}')
+        return '__ALAS_DISCOVER_OK__' in out
     finally:
         try:
             os.remove(local)
@@ -375,6 +397,14 @@ def cmd_set(args):
 
     check, _ = read_prefs(adb, args.package, args.prefs_file)
     now = ModPrefs.parse(check).get(str(args.key)) if check else None
+    # 回读校验（第九轮 N9-1）：写入失败时如实报错，别让用户拿着「[+] 已写入 +
+    # 旧值」去追一个根本不生效的 key。
+    now_val = str(now[1]).lower() if now else None
+    target = str(value).lower()
+    if now_val is None or now_val != target:
+        print(f'[!] 写入未生效（回读 key={args.key} = {now}，期望 {value!r}）。')
+        print('    可能原因：su/写入链失败、或游戏进程仍在运行把值覆盖了回去。')
+        return 1
     print(f'[+] 已写入，回读 key={args.key} = {now}')
     print('\n下一步：启动游戏，打开悬浮窗看那个功能有没有真的变化。')
     print(f'  - 变了   -> 这个 key({args.key}) 就是它，记下来填进 OffKeys/OnKeys')
