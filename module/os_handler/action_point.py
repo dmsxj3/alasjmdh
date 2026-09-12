@@ -141,7 +141,6 @@ class ActionPointHandler(UI, MapEventHandler):
         LogRes(self.config).Oil = oil
         logger.info(f'Action points: {current}({total}), oil: {oil}')
         LogRes(self.config).ActionPoint = {'Value': current, 'Total': total}
-        self.config.update()
         self._action_point_current = current
         self._action_point_box = box
         self._action_point_total = total
