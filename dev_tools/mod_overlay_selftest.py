@@ -401,6 +401,11 @@ su_stop = [c for c in dev14.calls if 'su -c' in c and 'stopservice' in c]
 su_start = [c for c in dev14.calls if 'su -c' in c and 'startservice' in c]
 check('su 先 stopservice 再 startservice 各一次（重建触发 onCreate 放小球）',
       len(su_stop) == 1 and len(su_start) == 1, f'stop={su_stop} start={su_start}')
+# ★ 回归守卫（第四轮审查 V-4）：su 成功时**不得**再走普通 startservice 兜底。
+# R-1 那次退化正是「快路径被静默改变」（判据恒真导致兜底死代码），而当时的
+# 断言完全测不出来 —— 这类行为变化必须用显式断言钉住。
+plain14 = [c for c in dev14.calls if 'am startservice' in c and 'su -c' not in c]
+eq('成功路径不走普通兜底（快路径守卫）', plain14, [])
 
 o15, cfg15, dev15 = make_overlay()
 dev15.windows_dump = DUMP

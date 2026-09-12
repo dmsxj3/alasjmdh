@@ -532,11 +532,18 @@ class ModOverlay(ModuleBase):
         #    不会重新放出小球，等 10s 必然超时，只能降级重启。root 的
         #    stopservice 可以真正停掉它（root 不受 exported 限制），随后的
         #    startservice 重新走 onCreate 把小球放出来。
-        #    ★ 失败判定用正向标记（2026-09-12 第二轮审查 N-1）：adbutils 的 shell
-        #    失败**不抛异常**，返回错误文本且往往不含 "Error"（实测 su 缺失时
-        #    返回 `sh: su: inaccessible or not found`）—— 用「不含 Error」当成功
-        #    会把 su 失败误判成成功、跳过兜底。而 am startservice 成功必打
-        #    `Starting service: Intent {...}`，以它为成功标记才是可靠判据。
+        #    ★ 失败判定（第三轮审查 R-1，真机实测定稿）：adbutils 的 shell 失败
+        #    不抛异常、返回错误文本且往往不含 "Error"（su 缺失实测返回
+        #    `sh: su: inaccessible or not found`）；而 am startservice 无论成败
+        #    都先打 `Starting service: Intent {...}` 前缀（AOSP 在调 AMS 之前
+        #    println），失败信息是其后的 `Error: ...` 行。所以单一标记不可靠，
+        #    必须用组合判据（见下方 _start_ok）：打了前缀 且 没有 Error 行才算
+        #    受理成功。
+        #    ⏱ 真实上界（第四轮审查 V-3）：本段最坏 ≈20s（su stop 5s + sleep 1s
+        #    + su start 5s + 普通兜底 5s，connect 内部还嵌套两次各 ≤5s 的
+        #    devices 查询）——只在 adb 本身不响应时出现；正常路径第一候选命中
+        #    在线列表就零开销返回。不做进一步收紧：过度收敛会把简单的顺序调用
+        #    改成需要传递 deadline 的复杂签名，收益不成比例。
         out_stop = ''
         try:
             out_stop = str(self.device.adb_shell(f'su -c "am stopservice -n {target}"') or '')
