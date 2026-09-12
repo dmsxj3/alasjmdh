@@ -497,12 +497,16 @@ check('缺 key 时不写设备', changed is False and h._applied == [])
 eq('缺 key 时仍记住本次决定', h.get_state(), False)
 check('configured=True（默认）', new_handler()[0].keys_configured is True)
 
-# 4.15 后端写失败时如实上报，不谎报成功
+# 4.15 后端写失败 + 读不到倍率状态 -> 直接停机（fail-closed，2026-09-12 语义更新：
+# 读不到最常见于用户手动把倍率拨到自定义档位 —— 设备实际带着倍率，重试就是赌封号）
 h, cfg, dev = new_handler()
 h.set_multiplier = lambda mode: False      # 后端没写成
 h.read_backend_state = lambda: None
-changed = h.check_then_set('exercise')
-check('后端未改动时 check_then_set 返回 False', changed is False)
+try:
+    h.check_then_set('exercise')
+    check('后端未改动且读不到状态时停机', False, '没有抛异常')
+except mh.RequestHumanTakeover:
+    check('后端未改动且读不到状态时停机', True)
 
 # 4.15b 敏感任务关倍率失败、设备确认还开着 -> 停机推送（RequestHumanTakeover）
 h, cfg, dev = new_handler()
@@ -515,12 +519,17 @@ except mh.RequestHumanTakeover as e:
     check('敏感任务关失败时抛 RequestHumanTakeover', 'exercise' in str(e), str(e))
 check('停机前不落盘「已关」的决定（不谎报）', h.get_state() is not True)
 
-# 设备读不到状态时保守处理：只上报失败，不武断停机
+# 设备读不到状态时停机（fail-closed），且停机前不把「已关」写进缓存
 h, cfg, dev = new_handler()
+h.set_state(True)
 h.set_multiplier = lambda mode: False
 h.read_backend_state = lambda: None
-changed = h.check_then_set('exercise')
-check('设备状态读不到时不停机、返回 False', changed is False)
+try:
+    h.check_then_set('exercise')
+    check('设备状态读不到时停机', False, '没有抛异常')
+except mh.RequestHumanTakeover:
+    check('设备状态读不到时停机', True)
+check('停机前不落盘「已关」的决定（不谎报）', h.get_state() is not False)
 
 # 常规任务开倍率失败也不停机（开了没开成只是少收益，不是封号风险）
 h, cfg, dev = new_handler()
@@ -548,18 +557,14 @@ for _task, _label in (('exercise', '演习'), ('coalition', '共斗'),
     except mh.RequestHumanTakeover as e:
         check(f'{_label}({_task}) 该关没关掉时停机', _task in str(e), str(e))
 
-# 回读确认不了时（游戏没跑 / overlay 被崩溃保护停用）不武断停机：
-# 后端返回 False 也可能只是「压根没能操作」，设备上未必真开着。
-for _state, _label in ((None, '读不到状态'), (False, '确认已关')):
-    h, cfg, dev = new_handler()
-    h.set_state(False)
-    h.set_multiplier = lambda mode: False
-    h.read_backend_state = lambda s=_state: s
-    try:
-        changed = h.check_then_set('exercise')
-        check(f'回读{_label}时不停机、返回 False', changed is False)
-    except mh.RequestHumanTakeover:
-        check(f'回读{_label}时不停机、返回 False', False, '不该停机')
+# 回读为 False（确认设备已在关位）时仍不停机：目标其实已达成，
+# 只是后端没能自证而已。读不到（None）则一律停机（见前面的用例）。
+h, cfg, dev = new_handler()
+h.set_state(False)
+h.set_multiplier = lambda mode: False
+h.read_backend_state = lambda: False
+changed = h.check_then_set('exercise')
+check('回读确认已关时不停机、返回 False', changed is False)
 
 # 4.15d Enabled=False 的强制关闭分支同样按「该关就停」处理
 for _task in ('exercise', 'minigame'):
@@ -609,8 +614,12 @@ h, cfg, dev = new_handler()
 h.set_state(True)                        # 缓存：上次决定是开
 h.set_multiplier = lambda mode: False    # 后端没写成
 h.read_backend_state = lambda: None      # 而且回读读不到设备状态
-eq('未确认达成时 check_then_set 返回 False', h.check_then_set('exercise'), False)
-eq('未确认达成时不把「已关」写进缓存（否则下次直接跳过写入）', h.get_state(), True)
+try:
+    h.check_then_set('exercise')
+    check('未确认达成且读不到状态时停机', False, '没有抛异常')
+except mh.RequestHumanTakeover:
+    check('未确认达成且读不到状态时停机', True)
+eq('停机路径同样不把「已关」写进缓存（否则下次直接跳过写入）', h.get_state(), True)
 
 # 反过来：回读确认设备确实已经在目标状态时，缓存照旧要更新。
 # 注意必须让两次回读给出不同结果：决策阶段读到 None（否则 current == want_on
@@ -623,8 +632,10 @@ h.read_backend_state = lambda: next(_reads, False)
 eq('后端没动但设备确认已达目标 -> 仍返回 False', h.check_then_set('exercise'), False)
 eq('设备确认已达目标时缓存更新为关', h.get_state(), False)
 
-# 4.15d3 后果断言：一次「读不到状态」的失败之后，下一个敏感任务必须仍然去尝试写入。
-# 这条正是 4.15d2 要防的场景 —— 缓存被污染成「已关」的话，第二次会一次后端调用都没有。
+# 4.15d3 后果断言（2026-09-12 语义更新）：「读不到状态」本身就是停机条件 ——
+# 最常见原因是用户手动把倍率拨到自定义档位（既不在 OffKeys 也不在 OnKeys 上），
+# 设备实际带着倍率，任何「下次重试」都是在拿敏感任务赌封号。
+# 停机由 RequestHumanTakeover 完成（alas.py 推送后退出），不存在第二次重试。
 h, cfg, dev = new_handler()
 h.set_state(True)
 h.read_backend_state = lambda: None
@@ -637,9 +648,12 @@ def _always_fail(mode):
 
 
 h.set_multiplier = _always_fail
-h.check_then_set('exercise')
-h.check_then_set('exercise')
-eq('读不到状态导致的失败不会让下一次敏感任务跳过写入', _calls, [False, False])
+try:
+    h.check_then_set('exercise')
+    check('读不到状态时第一次失败就停机', False, '没有抛异常')
+except mh.RequestHumanTakeover:
+    check('读不到状态时第一次失败就停机', True)
+eq('停机前只尝试过一次写入', _calls, [False])
 
 # 4.15e 后端抛异常必须落到「关失败」判定上。
 # 以前异常直接冒泡到 alas.py 的宽 except，只记一条 warning 就继续跑任务 ——

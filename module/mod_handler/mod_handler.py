@@ -559,12 +559,19 @@ class ModHandler(ModuleBase):
                 changed = self.set_multiplier(False)
                 if not changed:
                     observed = self._stop_if_still_on(task)
+                    if observed is None:
+                        # 与主流程同一规则：读不到倍率状态就停机交人工
+                        # （手动改过倍率或设备读取断开，都无法证明已安全关闭）。
+                        logger.critical(
+                            'ModHandler: 强制关闭后读不到倍率状态 —— 停止 Alas 交人工处理')
+                        raise RequestHumanTakeover(
+                            f'ModHandler: multiplier state unreadable (task `{task}`, '
+                            f'Enabled=False)')
                     if observed is not False:
                         # 与 check_then_set 同一套道理：没回读确认「已关」时不要写缓存，
                         # 否则下次会拿这份缓存当成「设备已经是关的」而直接跳过。
                         logger.warning(
-                            'ModHandler: 未能确认倍率已关（回读 '
-                            f'{"unknown" if observed is None else "ON"}），保留原有缓存')
+                            'ModHandler: 未能确认倍率已关（回读 ON），保留原有缓存')
                         return False
                 self.set_state(False)
                 return changed
@@ -645,12 +652,25 @@ class ModHandler(ModuleBase):
                 # 这份缓存会被 current_state() 当作「设备状态」的替身：一旦把
                 # 「已关」写进去，下一个敏感任务读到 current == want_on 就直接
                 # return，连写入都不再尝试 —— 那正是「以为关了其实没关」。
-                # 尤其「读不到状态（None）」时最危险：设备上到底开着没有我们并不
-                # 知道，更不能替它宣称已达成。宁可下次重新尝试。
+                if observed is None:
+                    # 读不到倍率状态（2026-09-12 实测）：最常见的原因是用户手动
+                    # 把倍率拨到了自定义档位 —— 既不在 OffKeys 也不在 OnKeys 上，
+                    # get_state() 只能报 None，而设备实际正带着倍率；也可能只是
+                    # 设备读取断开。两种情况都无法证明倍率处于安全状态，
+                    # 直接停机交人工：raise 后 alas.py 会推送
+                    # 「倍率控制失败，已停止调度」并退出。
+                    logger.critical(
+                        f'ModHandler: 读不到倍率状态（task `{task}`，target '
+                        f'{"ON" if want_on else "OFF"}）—— 常见于手动改过倍率'
+                        f'（自定义档位不在 OffKeys/OnKeys 上）或设备读取断开，'
+                        f'停止 Alas 交人工处理')
+                    raise RequestHumanTakeover(
+                        f'ModHandler: multiplier state unreadable (task `{task}`) — '
+                        f'可能手动改过倍率或设备读取断开，请人工确认倍率已关')
                 logger.warning(
                     f'ModHandler: 未能确认达成目标（task `{task}`，'
                     f'target {"ON" if want_on else "OFF"}，回读 '
-                    f'{"unknown" if observed is None else ("ON" if observed else "OFF")}），'
+                    f'{"ON" if observed else "OFF"}），'
                     f'保留原有缓存，下次决策会重新尝试')
                 return False
             logger.warning(f'ModHandler: 后端没有改动任何开关（task `{task}`，'
