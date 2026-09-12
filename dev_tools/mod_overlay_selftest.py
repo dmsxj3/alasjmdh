@@ -272,14 +272,28 @@ check('_disabled 是类属性：新建实例仍然停用（旧实现这里会回
       b._disabled is True)
 check('_disabled 定义在类上，不在实例字典里', '_disabled' not in a.__dict__)
 
-# 停用后不得再碰悬浮窗：fallback 关 -> 只报失败
+class StubPrefs:
+    """记录调用的假 ModPrefs，用来验证降级链路。"""
+
+    def __init__(self, result=True):
+        self.result = result
+        self.calls = []
+
+    def set_multiplier(self, mode):
+        self.calls.append(mode)
+        return self.result
+
+
+# 停用后不得再碰悬浮窗：直接自动降级走 prefs（2026-09-12 起不再受开关控制）
 set_device_xml(b, xml_of(**{'1': 1000, '2': 1000, '3': 1000}))
 b.config.data['ModHandler']['ModHandler']['OverlayFallbackPrefs'] = False
+b._prefs = StubPrefs(result=True)
 dev_b.calls.clear()
-eq('停用 + 关闭降级 -> 返回 False', b.set_multiplier(False), False)
+eq('停用 + 降级开关关闭 -> 仍自动降级走 prefs', b.set_multiplier(False), True)
 touched = [c for c in dev_b.calls
            if 'startservice' in c or 'stopservice' in c or 'input tap' in c or 'input swipe' in c]
 eq('停用后完全不碰悬浮窗', touched, [])
+eq('降级把 mode 透传给 prefs', b._prefs.calls, [False])
 ModOverlay._disabled = False
 
 # ---------------------------------------------------------------- 7. set_multiplier 主路径
@@ -295,38 +309,26 @@ check('OverlayFallbackPrefs=True 时才允许降级',
       make_overlay(OverlayFallbackPrefs=True)[0].fallback_enabled is True)
 
 
-class StubPrefs:
-    """记录调用的假 ModPrefs，用来验证降级链路。"""
-
-    def __init__(self, result=True):
-        self.result = result
-        self.calls = []
-
-    def set_multiplier(self, mode):
-        self.calls.append(mode)
-        return self.result
-
-
 o7, cfg7, dev7 = make_overlay()
 set_device_xml(o7, xml_of(**{'1': 1, '2': 1, '3': 1}))   # 设备上已经是关
 dev7.calls.clear()
 eq('已是目标状态 -> True（不动作）', o7.set_multiplier(False), True)
 eq('已是目标状态时不碰设备', [c for c in dev7.calls if 'startservice' in c], [])
 
-o8, cfg8, dev8 = make_overlay(OverlayFallbackPrefs=True)   # 必须显式开启：默认是关的
+o8, cfg8, dev8 = make_overlay(OverlayFallbackPrefs=True)   # 开关已废弃，传什么行为一致
 set_device_xml(o8, xml_of(**{'1': 1000, '2': 1000, '3': 1000}))
 o8._prefs = StubPrefs(result=True)
 o8._disabled = True                                # 强制走降级分支
-eq('停用 + 开启降级 -> 走 prefs 并返回其结果', o8.set_multiplier(False), True)
+eq('停用 -> 走 prefs 并返回其结果', o8.set_multiplier(False), True)
 eq('降级时把 mode 透传给 ModPrefs', o8._prefs.calls, [False])
 
-# 反例：停用 + 没开降级 -> 如实返回 False，绝不偷偷写 prefs
+# 开关关闭时行为一致：自动降级不再受 OverlayFallbackPrefs 控制
 o8b, cfg8b, dev8b = make_overlay()                 # OverlayFallbackPrefs 缺省 = 关
 set_device_xml(o8b, xml_of(**{'1': 1000, '2': 1000, '3': 1000}))
 o8b._prefs = StubPrefs(result=True)
 o8b._disabled = True
-eq('停用 + 未开降级 -> 返回 False', o8b.set_multiplier(False), False)
-eq('未开降级时不碰 prefs', o8b._prefs.calls, [])
+eq('停用 + 降级开关关闭 -> 同样自动降级', o8b.set_multiplier(False), True)
+eq('自动降级时透传给 prefs', o8b._prefs.calls, [False])
 
 # 真实降级链路（不替换 prefs_reader）：停用 overlay + 开启降级 -> 真写 prefs
 o9, cfg9, dev9 = make_overlay(OverlayFallbackPrefs=True)
@@ -455,15 +457,16 @@ check('游戏未运行时确实推送了新的 XML',
       any(c.startswith('adb_push:') for c in devg.calls), str(devg.calls))
 eq('游戏未运行时设备上的倍率已关', og.get_state(), False)
 
-# 反向：游戏在跑时仍优先走悬浮窗，不能因为这次改动把正常路径也改成写 prefs
+# 反向：游戏在跑时仍优先走悬浮窗；悬浮窗失败后自动降级（不再看降级开关），
+# 不会因为这次改动把正常悬浮窗路径改回写 prefs
 og3, cfgg3, devg3 = make_overlay(OverlayFallbackPrefs=False)
 set_device_xml(og3, xml_of(**{'1': 1000, '2': 1000, '3': 1000}))
 devg3.running = True
 devg3.windows_dump = ''                 # 窗口不出现 -> 悬浮窗路径失败
 og3._prefs = StubPrefs(result=True)
 og3.show = lambda *a, **k: False        # 跳过 10s 超时，直接失败
-eq('游戏在跑时悬浮窗失败且未开降级 -> 返回 False', og3.set_multiplier(False), False)
-eq('游戏在跑时不会绕过降级开关去写 prefs', og3._prefs.calls, [])
+eq('游戏在跑时悬浮窗失败 -> 自动降级走 prefs 并成功', og3.set_multiplier(False), True)
+eq('自动降级把 mode 透传给 prefs', og3._prefs.calls, [False])
 
 # 游戏未运行时 prefs 也写不进去：如实返回 False，交给 ModHandler 判断是否停机
 og2, cfgg2, devg2 = make_overlay(OverlayFallbackPrefs=False)

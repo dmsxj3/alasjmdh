@@ -157,10 +157,9 @@ class ModOverlay(ModuleBase):
 
     @property
     def fallback_enabled(self):
-        # 默认关：与 config_generated.py / args.json / argument.yaml / template.json
-        # 四处配置源一致（也见模块 docstring 的「默认关，打开后生效」）。
-        # 这里曾经写成 default=True，配置里缺这个键时会静默变成「允许重启游戏」，
-        # 与文档和用户偏好相反。
+        # ★ 已废弃（2026-09-12）：悬浮窗失败现在无条件自动降级（停游戏 + prefs
+        #   重写），不再读取这个开关。属性仅为兼容 GUI/配置与旧自检保留，
+        #   set_multiplier 不再调用它。默认值仍与四处配置源一致（false）。
         return bool(deep_get(self.config.data,
                              'ModHandler.ModHandler.OverlayFallbackPrefs',
                              default=False))
@@ -871,12 +870,16 @@ class ModOverlay(ModuleBase):
                 ok = False
 
         if not ok:
-            logger.warning('ModOverlay: 悬浮窗方式未能确认生效')
-            if self.fallback_enabled:
-                return self._apply_via_prefs(mode, '降级到 prefs（需要重启游戏才生效）')
-            logger.critical('ModOverlay: 未生效且已关闭降级，'
-                            '敏感任务可能带着倍率开打，请立刻检查！')
-            return False
+            # ★ 自动降级（2026-09-12 语义，不再受 OverlayFallbackPrefs 开关控制）：
+            # 悬浮窗确认不了生效 -> 停游戏 + prefs 重写（写完游戏保持关闭、
+            # 由 ALAS 排 Restart 拉起），之后任务边界继续走悬浮窗路径。
+            # 最坏情况（root 断了、prefs 也写不了）如实返回 False 交 ModHandler
+            # 记日志，绝不因倍率问题停机。
+            # 例外自动保留：Alas.Error.HandleError=False 时 ModPrefs 会拒绝
+            # 强停游戏（互斥保护），降级自行失败返回 False，不会违背该配置。
+            logger.warning('ModOverlay: 悬浮窗方式未能确认生效 —— '
+                           '自动降级：停游戏 + prefs 重写（写完由 ALAS 拉起）')
+            return self._apply_via_prefs(mode, '自动降级（停游戏 + prefs 重写，由 ALAS 拉起）')
         return True
 
     def _apply_via_prefs(self, mode, reason):
