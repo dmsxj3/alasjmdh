@@ -35,10 +35,6 @@
     "Tool": {
       "name": "工具",
       "help": ""
-    },
-    "ModHandler": {
-      "name": "悬浮窗倍率控制",
-      "help": ""
     }
   },
   "Task": {
@@ -3238,6 +3234,22 @@
       "name": "配置文件名",
       "help": "悬浮窗存开关的 SharedPreferences 文件名（不含 .xml）。\n默认 com.bilibili.azurlane_preferences。"
     },
+    "OverlayService": {
+      "name": "悬浮窗调起组件",
+      "help": "mod 里注册但平时不会被调用的备用 Service（exported=false）。用 shell 直接启动会被 Android 12 拒绝（not exported），代码会自动走 root：su -c stopservice + startservice 真正重建 Service，让悬浮窗重新出现（必须先停再启 —— Service 还活着时 startservice 只走 onStartCommand，不会重建窗口）。\n如果面板/小球还在屏幕上，会直接使用它，完全不碰 Service。\n★ 只在游戏进程已经在跑时才调起：进程不在时 startservice 会新起一个进程，那里原生库还没初始化，Launcher.onCreate -> new Menu -> Menu.Icon() 会抛 UnsatisfiedLinkError 把游戏整个搞崩。\n默认 com.android.support.Launcher（JMBQ 3.4.0 实测）。"
+    },
+    "OverlaySurvivalSeconds": {
+      "name": "悬浮窗存活秒数（兜底值）",
+      "help": "对应 mod 内部 prefs 键 -98，可在 mod 面板「设置」页里改。\nAlas 优先读设备上真实的 -98，读不到才用这里的值；游戏关着的时候会顺便把它写成这个值。\n实测面板每次被触摸都会重新计时，所以操作期间不会中途消失；做完等它自灭再继续任务，避免面板挡住 Alas 的截图识别。默认 20。"
+    },
+    "OverlayVisualVerify": {
+      "name": "改完再截图复核一遍",
+      "help": "开启（默认）：改完之后，除了读 XML 精确核对外，再截一张图做第二道确认 ——\n三个倍率：在截图上找滑块 thumb（青色圆点）的位置反解数值；「以德服人」：采样开关区域的颜色判断开/关。\n这一条只做记录：识图读不出来（背景干扰等）不会判失败，权威判据始终是 XML。"
+    },
+    "OverlayFallbackPrefs": {
+      "name": "失败时降级到 prefs（已废弃，恒为自动）",
+      "help": "★ 已废弃：悬浮窗失败时现在总是自动降级（停游戏 → 重写 prefs → ALAS 自动拉起游戏），仍失败则停机并推送通知。这个开关不再被读取，保留仅为配置兼容。"
+    },
     "OffKeys": {
       "name": "关闭倍率时写入",
       "help": "关闭倍率时要写成的键值对，形如 1=1,2=1,3=1,35=false（也支持 JSON：键与值都加双引号）。\n官服 JMBQ 3.4.0 实测：1/2/3 = 倍率（关=1，开=1000），35 = 以德服人（关=false，开=true）。\n换版本或换服请用 dev_tools/mod_discover.py 重新发现：先 snapshot，手动关掉悬浮窗里的倍率，再 diff。"
@@ -3278,22 +3290,6 @@
     "UiWaitTimeout": {
       "name": "控件等待超时(秒)",
       "help": "ui 方式专用：等待控件出现的秒数，设备慢就调大。"
-    },
-    "OverlayService": {
-      "name": "悬浮窗调起组件",
-      "help": "mod 里注册但平时不会被调用的备用 Service（exported=false）。用 shell 直接启动会被 Android 12 拒绝（not exported），代码会自动走 root：su -c stopservice + startservice 真正重建 Service，让悬浮窗重新出现（必须先停再启 —— Service 还活着时 startservice 只走 onStartCommand，不会重建窗口）。\n如果面板/小球还在屏幕上，会直接使用它，完全不碰 Service。\n★ 只在游戏进程已经在跑时才调起：进程不在时 startservice 会新起一个进程，那里原生库还没初始化，Launcher.onCreate -> new Menu -> Menu.Icon() 会抛 UnsatisfiedLinkError 把游戏整个搞崩。\n默认 com.android.support.Launcher（JMBQ 3.4.0 实测）。"
-    },
-    "OverlaySurvivalSeconds": {
-      "name": "悬浮窗存活秒数（兜底值）",
-      "help": "对应 mod 内部 prefs 键 -98，可在 mod 面板「设置」页里改。\nAlas 优先读设备上真实的 -98，读不到才用这里的值；游戏关着的时候会顺便把它写成这个值。\n实测面板每次被触摸都会重新计时，所以操作期间不会中途消失；做完等它自灭再继续任务，避免面板挡住 Alas 的截图识别。默认 20。"
-    },
-    "OverlayVisualVerify": {
-      "name": "改完再截图复核一遍",
-      "help": "开启（默认）：改完之后，除了读 XML 精确核对外，再截一张图做第二道确认 ——\n三个倍率：在截图上找滑块 thumb（青色圆点）的位置反解数值；「以德服人」：采样开关区域的颜色判断开/关。\n这一条只做记录：识图读不出来（背景干扰等）不会判失败，权威判据始终是 XML。"
-    },
-    "OverlayFallbackPrefs": {
-      "name": "失败时降级到 prefs（已废弃，恒为自动）",
-      "help": "★ 已废弃：悬浮窗失败时现在总是自动降级（停游戏 → 重写 prefs → ALAS 自动拉起游戏），仍失败则停机并推送通知。这个开关不再被读取，保留仅为配置兼容。"
     }
   },
   "Storage": {

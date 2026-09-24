@@ -173,8 +173,12 @@ class ConfigGenerator:
         # Construct args
         data = {}
         # Add dashboard to args
-        dashboard_and_task = {**self.dashboard,**self.task}
-        for path, groups in deep_iter(dashboard_and_task, depth=3):
+        # 注意 min_depth=1 不能省：dashboard.yaml 的值是 list（`Dashboard: [Oil, Coin, ...]`），
+        # 而 deep_iter 只把 dict 放进队列，depth=1 处的非 dict 值只有 min_depth=1 时才会被 yield。
+        # 漏掉它会让下面 `'Dashboard' in path` 那个分支变成死代码 —— 生成器跑一次就会把
+        # Dashboard 整组配置从 args.json / template.json / i18n 里删掉。
+        dashboard_and_task = {**self.dashboard, **self.task}
+        for path, groups in deep_iter(dashboard_and_task, min_depth=1, depth=3):
             if 'tasks' not in path and 'Dashboard' not in path:
                 continue
             task = path[2] if 'tasks' in path else path[0]

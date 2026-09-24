@@ -35,10 +35,6 @@
     "Tool": {
       "name": "Tools",
       "help": ""
-    },
-    "ModHandler": {
-      "name": "Multiplier Control",
-      "help": ""
     }
   },
   "Task": {
@@ -3238,6 +3234,22 @@
       "name": "Prefs file name",
       "help": "SharedPreferences file holding the overlay switches, without .xml.\nDefault com.bilibili.azurlane_preferences."
     },
+    "OverlayService": {
+      "name": "Overlay summon service",
+      "help": "A backup Service registered by the mod but normally never invoked (exported=false). Starting it via shell is rejected by Android 12 (not exported); the code automatically falls back to root: su -c stopservice + startservice to truly recreate the Service and bring the floating window back (stop first, then start — while the Service is alive, startservice only goes through onStartCommand and never recreates the window).\nIf the panel/ball is already on screen, it is used directly without touching the Service.\n★ Only invoke while the game process is running: without a process, startservice spawns a new one where native libs are uninitialized; Launcher.onCreate -> new Menu -> Menu.Icon() throws UnsatisfiedLinkError and crashes the whole game.\nDefault com.android.support.Launcher (tested on JMBQ 3.4.0)."
+    },
+    "OverlaySurvivalSeconds": {
+      "name": "Overlay survival seconds (fallback)",
+      "help": "Maps to the mod's internal prefs key -98 (settable in the mod panel).\nAlas prefers the real -98 read from the device; this value is only used when it is unreadable.\nThe panel timer restarts on every touch, so it will not vanish mid-operation; afterwards Alas waits for it to kill itself so it cannot occlude screenshot recognition. Default 20."
+    },
+    "OverlayVisualVerify": {
+      "name": "Screenshot verification",
+      "help": "On (default): besides the authoritative XML check, take a screenshot as a second opinion - locate the slider thumbs to derive the three multipliers, and sample the switch colours.\nThis is informational only: unreadable results never count as a failure; XML stays authoritative."
+    },
+    "OverlayFallbackPrefs": {
+      "name": "Fall back to prefs on failure (deprecated, always automatic)",
+      "help": "★ Deprecated: on floating-window failure the code now ALWAYS auto-falls-back (stop game -> rewrite prefs -> ALAS relaunches it), and stops + pushes a notification if that still fails. This toggle is no longer read and is kept for config compatibility only."
+    },
     "OffKeys": {
       "name": "Values when turning OFF",
       "help": "Key/value pairs written when disabling the multiplier, such as 1=1,2=1,3=1,35=false (a JSON object with quoted keys and values also works).\nVerified on official-server JMBQ 3.4.0: 1/2/3 = multiplier (off=1, on=1000), 35 = yi de fu ren (off=false, on=true).\nRe-discover with dev_tools/mod_discover.py when the mod version or server changes."
@@ -3278,22 +3290,6 @@
     "UiWaitTimeout": {
       "name": "Widget wait timeout (s)",
       "help": "ui backend only: seconds to wait for a widget to appear. Increase it on a slow device."
-    },
-    "OverlayService": {
-      "name": "Overlay summon service",
-      "help": "A backup Service registered by the mod but normally never invoked (exported=false). Starting it via shell is rejected by Android 12 (not exported); the code automatically falls back to root: su -c stopservice + startservice to truly recreate the Service and bring the floating window back (stop first, then start — while the Service is alive, startservice only goes through onStartCommand and never recreates the window).\nIf the panel/ball is already on screen, it is used directly without touching the Service.\n★ Only invoke while the game process is running: without a process, startservice spawns a new one where native libs are uninitialized; Launcher.onCreate -> new Menu -> Menu.Icon() throws UnsatisfiedLinkError and crashes the whole game.\nDefault com.android.support.Launcher (tested on JMBQ 3.4.0)."
-    },
-    "OverlaySurvivalSeconds": {
-      "name": "Overlay survival seconds (fallback)",
-      "help": "Maps to the mod's internal prefs key -98 (settable in the mod panel).\nAlas prefers the real -98 read from the device; this value is only used when it is unreadable.\nThe panel timer restarts on every touch, so it will not vanish mid-operation; afterwards Alas waits for it to kill itself so it cannot occlude screenshot recognition. Default 20."
-    },
-    "OverlayVisualVerify": {
-      "name": "Screenshot verification",
-      "help": "On (default): besides the authoritative XML check, take a screenshot as a second opinion - locate the slider thumbs to derive the three multipliers, and sample the switch colours.\nThis is informational only: unreadable results never count as a failure; XML stays authoritative."
-    },
-    "OverlayFallbackPrefs": {
-      "name": "Fall back to prefs on failure (deprecated, always automatic)",
-      "help": "★ Deprecated: on floating-window failure the code now ALWAYS auto-falls-back (stop game -> rewrite prefs -> ALAS relaunches it), and stops + pushes a notification if that still fails. This toggle is no longer read and is kept for config compatibility only."
     }
   },
   "Storage": {

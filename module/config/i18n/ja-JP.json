@@ -35,10 +35,6 @@
     "Tool": {
       "name": "ツール",
       "help": ""
-    },
-    "ModHandler": {
-      "name": "倍率制御",
-      "help": ""
     }
   },
   "Task": {
@@ -3238,6 +3234,22 @@
       "name": "設定ファイル名",
       "help": "フローティングメニューのスイッチを保存する SharedPreferences のファイル名（.xml を除く）。\n既定は com.bilibili.azurlane_preferences。"
     },
+    "OverlayService": {
+      "name": "オーバーレイ起動用コンポーネント",
+      "help": "mod に登録されているが通常は呼ばれない予備 Service（exported=false）。shell からの直接起動は Android 12 で拒否される（not exported）ため、コードは自動的に root 経路を使います：su -c stopservice + startservice で Service を本当に再構築し、floating window を再表示します（先に停止してから起動する必要があります —— Service が生存中の場合、startservice は onStartCommand のみを通過し、ウィンドウは再構築されません）。\nパネル/ボールが画面上にあれば、それを直接使用し Service には触れません。\n★ ゲームプロセスが起動している時のみ呼び出します：プロセスがない状態で startservice すると新しいプロセスが立ち上がり、ネイティブライブラリが未初期化のため Launcher.onCreate -> new Menu -> Menu.Icon() が UnsatisfiedLinkError を投げ、ゲーム全体がクラッシュします。\nデフォルト com.android.support.Launcher（JMBQ 3.4.0 で実測）。"
+    },
+    "OverlaySurvivalSeconds": {
+      "name": "オーバーレイ生存秒数（フォールバック）",
+      "help": "mod 内部の prefs キー -98 に対応（mod パネルで設定可）。\nAlas は端末の実際の -98 を優先し、読めない場合のみこの値を使います。\nパネルはタッチごとにタイマーが再起動するため操作中に消えません。操作後は自滅を待ってからタスクを続行します（スクリーンショット認識を妨げないため）。既定 20。"
+    },
+    "OverlayVisualVerify": {
+      "name": "スクリーンショット検証",
+      "help": "既定で有効：XML による厳密確認に加えて、スクリーンショットでも二重確認します（スライダーのつまみ位置から倍率を逆算し、スイッチの色をサンプリング）。\nこれは記録用です：読み取れなくても失敗扱いにはせず、XML の判定を優先します。"
+    },
+    "OverlayFallbackPrefs": {
+      "name": "失敗時の prefs フォールバック（廃止済み・常に自動）",
+      "help": "★ 廃止済み：floating window が失敗した場合、常に自動フォールバック（ゲーム停止 → prefs 再書き込み → ALAS が自動で再起動）を行い、それでも失敗した場合は停止して通知を送ります。このスイッチは読み取られなくなり、設定互換のためだけに残されています。"
+    },
     "OffKeys": {
       "name": "倍率オフ時に書き込む値",
       "help": "倍率を無効にするときに書き込むキーと値。例：1=1,2=1,3=1,35=false（キーと値を二重引用符で囲んだ JSON 形式も可）。\n公式サーバー JMBQ 3.4.0 で実測：1/2/3 = 倍率（オフ=1、オン=1000）、35 = 以徳服人（オフ=false、オン=true）。\nMOD のバージョンやサーバーが変わったら dev_tools/mod_discover.py で再検出してください。"
@@ -3278,22 +3290,6 @@
     "UiWaitTimeout": {
       "name": "ウィジェット待ち時間(秒)",
       "help": "ui 方式専用：ウィジェットの出現を待つ秒数。遅い端末では大きくしてください。"
-    },
-    "OverlayService": {
-      "name": "オーバーレイ起動用コンポーネント",
-      "help": "mod に登録されているが通常は呼ばれない予備 Service（exported=false）。shell からの直接起動は Android 12 で拒否される（not exported）ため、コードは自動的に root 経路を使います：su -c stopservice + startservice で Service を本当に再構築し、floating window を再表示します（先に停止してから起動する必要があります —— Service が生存中の場合、startservice は onStartCommand のみを通過し、ウィンドウは再構築されません）。\nパネル/ボールが画面上にあれば、それを直接使用し Service には触れません。\n★ ゲームプロセスが起動している時のみ呼び出します：プロセスがない状態で startservice すると新しいプロセスが立ち上がり、ネイティブライブラリが未初期化のため Launcher.onCreate -> new Menu -> Menu.Icon() が UnsatisfiedLinkError を投げ、ゲーム全体がクラッシュします。\nデフォルト com.android.support.Launcher（JMBQ 3.4.0 で実測）。"
-    },
-    "OverlaySurvivalSeconds": {
-      "name": "オーバーレイ生存秒数（フォールバック）",
-      "help": "mod 内部の prefs キー -98 に対応（mod パネルで設定可）。\nAlas は端末の実際の -98 を優先し、読めない場合のみこの値を使います。\nパネルはタッチごとにタイマーが再起動するため操作中に消えません。操作後は自滅を待ってからタスクを続行します（スクリーンショット認識を妨げないため）。既定 20。"
-    },
-    "OverlayVisualVerify": {
-      "name": "スクリーンショット検証",
-      "help": "既定で有効：XML による厳密確認に加えて、スクリーンショットでも二重確認します（スライダーのつまみ位置から倍率を逆算し、スイッチの色をサンプリング）。\nこれは記録用です：読み取れなくても失敗扱いにはせず、XML の判定を優先します。"
-    },
-    "OverlayFallbackPrefs": {
-      "name": "失敗時の prefs フォールバック（廃止済み・常に自動）",
-      "help": "★ 廃止済み：floating window が失敗した場合、常に自動フォールバック（ゲーム停止 → prefs 再書き込み → ALAS が自動で再起動）を行い、それでも失敗した場合は停止して通知を送ります。このスイッチは読み取られなくなり、設定互換のためだけに残されています。"
     }
   },
   "Storage": {
