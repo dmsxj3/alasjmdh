@@ -10,10 +10,16 @@ from module.ui.page import page_campaign_menu, page_coalition, page_event, page_
 from module.war_archives.assets import WAR_ARCHIVES_CAMPAIGN_CHECK
 
 
+# Fork customization: stage GemsFarming falls back to when the running event is over.
+# Upstream hardcodes '2-4' here, this fork uses '16-3'.
+# Keep this as the single source of truth, do not inline the stage name again.
+GEMS_FARMING_FALLBACK_STAGE = '16-3'
+
+
 class CampaignEvent(CampaignStatus):
     def _reset_gems_farming(self, tasks):
         """
-        Reset GemsFarming to 2-4 when event is over
+        Reset GemsFarming to GEMS_FARMING_FALLBACK_STAGE when event is over
 
         Args:
             tasks (list[str]): Task name
@@ -21,10 +27,10 @@ class CampaignEvent(CampaignStatus):
         for task in tasks:
             if task not in GEMS_FARMINGS:
                 continue
-            name = self.config.cross_get(keys=f'{task}.Campaign.Name', default='2-4')
+            name = self.config.cross_get(keys=f'{task}.Campaign.Name', default=GEMS_FARMING_FALLBACK_STAGE)
             if not self.stage_is_main(name):
-                logger.info(f'Reset GemsFarming to 2-4')
-                self.config.cross_set(keys=f'{task}.Campaign.Name', value='2-4')
+                logger.info(f'Reset GemsFarming to {GEMS_FARMING_FALLBACK_STAGE}')
+                self.config.cross_set(keys=f'{task}.Campaign.Name', value=GEMS_FARMING_FALLBACK_STAGE)
                 self.config.cross_set(keys=f'{task}.Campaign.Event', value='campaign_main')
 
     def _disable_tasks(self, tasks):
