@@ -2,8 +2,9 @@
 
 > 仓库：`dmsxj3/alasjmdh`（origin）／ 上游：`LmeSzinc/AzurLaneAutoScript`（upstream/master）
 > 本 Fork = [`Zuosizhu/Alas-with-Dashboard`](https://github.com/Zuosizhu/Alas-with-Dashboard) 的仪表盘线 + 自研 ModHandler（悬浮窗倍率控制）线
-> **权威口径**：`git diff --name-only upstream/master dev` 当前输出 **54 个文件** —— 这 54 个就是本 Fork 的"魔改面"，其余全部可直接跟随上游。
-> 最后核对：2026-10-17（dev = `6879ba03d`，upstream = `cb16b4a89`）
+> **权威口径**：`git diff --name-only upstream/master dev` 当前输出 **62 个文件** = **54 个业务魔改** + **8 个 AI 协作体系文件**（`.agents/**` + `AGENTS.md` + `MEMORY.md`）。这 62 个就是本 Fork 的"魔改面"，其余全部可直接跟随上游。
+> 最后核对：2026-10-18（dev = `dd25a9257`，upstream = `cb16b4a89`）
+> **历史基线**：2026-10-17 之前为 54 个（业务魔改）；2026-10-18 引入 AI 协作体系后 +8。若数字再次突变，先查是不是新增了本地文件。
 
 ---
 
@@ -61,6 +62,27 @@ assets/cn/campaign/OCR_OIL_LIMIT.png
 | `.gitignore` | 末尾 fork 追加 5 条忽略规则：`config/mod_handler/`、`.git_corrupt_bak_*/`、`_modhandler_bak/`、`_alas_wip_backup_*/`、`dev_tools/.mod_snapshots/`。**master 分支没有这 5 条**，切分支时本地产物会从"被忽略"变"未跟踪"，这是正常的，别往 master 加规则 |
 | `alas.py` | 启动入口的 ModHandler 挂钩 |
 | `README.md` | 致谢头部 + 已合并上游的说明 |
+
+### 1.6 AI 协作体系（2026-10-18 新增，上游完全不存在）
+
+这 8 个文件是 Fork 独有的**经验库与 Agent 规范**，构成"双 Skill + 动态记忆账本"。**任何合并都不得删除或覆盖它们**（`git checkout --theirs` / `reset --hard` 对它们无效，但 `git clean -fd` 会删掉未跟踪版本，注意）。
+
+| 路径 | 作用 |
+|---|---|
+| `AGENTS.md` | 跨工具入口（DSH / ZCode / Codex 自动读取） |
+| `MEMORY.md` | 与 `AGENTS.md` **逐字节一致**（WorkBuddy 自动读取）。改一份必须 `cp` 同步另一份 |
+| `.agents/skills/upstream-merger/SKILL.md` | 合并上游 Agent 规范（4 阶段，含 GitHub 双向同步铁律） |
+| `.agents/skills/dev-reviewer/SKILL.md` | dev 审查 Agent 规范（3 阶段） |
+| `.agents/memory/fork-override-map.md` | 本文件 |
+| `.agents/memory/conflict-ledger.md` | 冲突判例库 |
+| `.agents/memory/dev-audit-rules.md` | 审查红线 9 条 |
+| `.agents/memory/latest-sync-context.md` | 双 Agent 交接单 |
+
+**维护约束**：
+
+- 规范源是 **`origin/dev`**（不是 `master`、不是 `main`）
+- `AGENTS.md` 与 `MEMORY.md` 必须逐字节一致：改完用 `diff -q` 或比对 `git hash-object` 校验
+- 这 8 个文件**会出现在魔改面统计里**（+8），所以 `git diff --name-only upstream/master dev` 应为 **62**；若回落到 54，说明经验库被丢了
 
 ---
 
@@ -141,7 +163,7 @@ module/handler/         module/meeting/        module/event/
 ## 四、判定流程（合并前必跑）
 
 ```bash
-# 1. 取当前魔改面（应≈54 个文件，数量突变说明有人改了保护清单）
+# 1. 取当前魔改面（应 = 62 个文件 = 54 业务魔改 + 8 AI 协作体系；数量突变说明保护清单变了）
 git diff --name-only upstream/master dev | sort > /tmp/fork_files.txt
 
 # 2. 取上游本次改动

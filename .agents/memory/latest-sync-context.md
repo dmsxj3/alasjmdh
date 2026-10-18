@@ -69,6 +69,17 @@
 - 下次合并前先跑：`git merge-tree --write-tree --name-only dev upstream/master`，exit=0 就放心合
 - 若出现多个冲突文件 → 大概率是上游又做结构性重构（如再次批量改 `assets.py` 路径），走 C-001/C-002 范式
 
+### 2026-10-18 复查：上游无新提交，无需合并
+
+```
+git rev-list --count cb16b4a89..upstream/master        → 0
+git ls-remote upstream refs/heads/master               → cb16b4a89（与本地一致）
+```
+
+- 结论：**自 2026-10-17 那次同步以来，上游 `LmeSzinc/AzurLaneAutoScript` 没有任何新提交**。本次任务未产生合并提交。
+- 顺带发现并已修正：魔改面由 54 → **62**（新增 8 个 AI 协作体系文件），`fork-override-map.md` 的基线数字已同步更新。
+- 下次开工只需重新 `fetch upstream` 确认 HEAD 是否仍为 `cb16b4a89`；变了才需要合并。
+
 ---
 
 ## 更新记录
