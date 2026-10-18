@@ -149,3 +149,13 @@ Merge remote-tracking branch 'upstream/master' into dev
 ---
 
 ## 追加区（新红线请写在这条线以下）
+### 2026-10-18 审查回写：红线 3 基线数字更新（实测）
+
+- 实测命令：扫描 `module/**/assets.py` + `campaign/**/assets.py` 全部 `./assets/...` 字符串引用 → `os.path.exists`
+- 实测结果：**45 个 assets.py / 7204 条引用 / 断链 0**（旧基线"46 个 / 6220–6228 条"已过期）
+- 偏差原因：引用数差约 +976 来自上游合并 `cb16b4a89`（PR #6056）与此前批次新增资产常量（`PAUSE_Bullet`、岛屿 `ISLAND_RESTAURANT_ANIMATION_CHECK` 等）；文件数 45 vs 46 为扫描口径差异（`module/` + `campaign/` 顶层递归，不含 submodule）。**断链 0 的核心判据不受影响**。
+- 后续以"断链 0"为阻断判据，文件数/引用数基线以最近一次实测为准，偏差 >5% 时先解释口径再判级。
+
+### 2026-10-18 审查回写：红线 9 提醒（建议级，未修）
+
+- `6879ba03d`（2026-10-17 合并 56e6ce0b0→cb16b4a89）的提交信息是 git 默认的 `Merge remote-tracking branch 'upstream/master' into dev`，**未按红线 9 范例写同步区间 + 提交数 + 按模块要点**。功能无影响，后续合并提交应补上（范例见红线 9）。
