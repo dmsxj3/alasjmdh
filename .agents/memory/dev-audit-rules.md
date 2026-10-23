@@ -176,10 +176,19 @@ Merge remote-tracking branch 'upstream/master' into dev
 - **权威判据永远是 `git merge-tree --write-tree` 的退出码**，不是候选数量
 - 详见 `fork-override-map.md` 第四节（已同步修正）
 
-### 2026-10-23 审查回写：红线 1 补充——min_depth=1 必须分分支检查（阻断级发现，未修）
+### 2026-10-23 审查回写：红线 1 补充——min_depth=1 必须分分支检查（阻断级，**已修复**）
 
-- **发现**：`origin/master` 的 `module/config/config_updater.py:177` 为 `deep_iter(dashboard_and_task, depth=3)`，**缺 `min_depth=1`**；dev:179 有。master 上 `dashboard.yaml` 存在 + 178 行 `'Dashboard' in path` 分支存在 → **master 检出态跑一次生成器即清空 Dashboard 配置组**。
-- **根因**：修复 `c651aae36`（2026-09-24）只提交在 dev 线，从未同步 master（`git log -S 'min_depth=1' master -- module/config/config_updater.py` 为空）。非合并丢失，是**跨分支历史遗漏**。
+- **发现**：`origin/master` 的 `module/config/config_updater.py:177` 为 `deep_iter(dashboard_and_task, depth=3)`，**缺 `min_depth=1`**；dev:181 有。master 上 `dashboard.yaml` 存在 + `'Dashboard' in path` 分支存在 → **master 检出态跑一次生成器即清空 Dashboard 配置组**。
+- **根因**：修复 `c651aae36`（2026-09-24）只提交在 dev 线，从未同步 master（`git log -S 'min_depth=1' origin/master -- module/config/config_updater.py` 为空）。非合并丢失，是**跨分支历史遗漏**。
 - **检测命令**：`git show origin/master:module/config/config_updater.py | grep -n 'min_depth=1'`（dev 侧红线 1 已有；**今后每次 master 合并后也要查 master 侧**）。
-- **修法（待用户裁决）**：worktree 里 `git cherry-pick c651aae36` 后 push master。
-- **教训**：fork 的关键修复落在 dev 后，**不会自动到达 master/ziyong**。今后 dev 上新增"红线级修复"提交时，应评估是否需要 cherry-pick 到 master。
+- **实测验证（2026-10-23 在 origin/master 的临时 worktree 上做）**：未修复状态下跑 `python -m module.config.config_updater`，`args.json` 与 `template.json` 里的 `"Dashboard"` 计数**从 1 变成 0**，整组被删。**后果确认成立。**
+- **修复（2026-10-23 已执行）**：提交 **`d304624c3`** 推送到 `origin/master`（`b203c937d..d304624c3`）。
+  - **不要用整份 `cherry-pick c651aae36`** —— 该提交改了 6 个文件（`config_updater.py` + `config/template.json` + 4 个 i18n），后 5 个此后已大幅分叉，cherry-pick 必然冲突，且会把 2026-09 的过期 i18n/template 内容带回来。
+  - **正确做法**：只取那一个文件 —— `git checkout c651aae36 -- module/config/config_updater.py`。前提是先确认 `git diff --quiet c651aae36^ origin/master -- module/config/config_updater.py`（2026-10-23 实测为真，即 master 该文件 = 修复前版本，取之即精确）。
+  - **修完必须跑生成器复验**：exit=0 且 `git status` 只剩 `config_updater.py` → 证明生成器幂等、master 配置本身正确。
+- **★ 结构性教训（新增，务必记住）**：`master` 的同步流程**只 merge upstream，从不 merge dev** → **dev 上任何 fork 独有修复都不会自动到达 master**。ziyong 靠快进跟随 dev，所以只有 master 有这个问题。
+  - **今后规则**：dev 上出现"红线级修复"提交（改的是 `module/config/*`、`module/mod_handler/*` 之外仍被 master 需要的逻辑）时，**必须评估是否同步到 master**，并在 master 每次同步后复查下列锚点：
+    ```bash
+    git show origin/master:module/config/config_updater.py | grep -c 'min_depth=1'   # 必须 =1
+    git show origin/master:module/config/argument/dashboard.yaml | head -3           # 必须存在
+    ```
