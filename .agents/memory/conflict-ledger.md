@@ -130,8 +130,16 @@ git cat-file -e upstream/master:<path>
 | 2026-10-08 | `c0476fb4e → 0078abb84` | 21 | 104 | `81bc7f7be` |
 | 2026-10-10 | `0078abb84 → 7d6a415e3` | 4 | 7 | `c8e9f93f9` |
 | 2026-10-17 | `56e6ce0b0 → cb16b4a89` | 6 | 11 | `6879ba03d` |
+| 2026-10-23 | `cb16b4a89 → 4d88c22d8` | 29 | 61 | `e6dda2ca2` |
 
 **启示**：这个 fork 大多数批次是零冲突的。**只有上游大改 `assets.py` 路径或重构目录结构时才容易撞**。如果某次突然出现多个冲突文件，先怀疑"上游做了结构性重构"，而不是"自己改错了"。
+
+### 2026-10-23 批次补充（重要参考）
+
+- 冲突候选 **7 个**（`config/template.json`、`module/campaign/run.py`、`module/config/argument/args.json`、4 个 i18n），**实际冲突 0 个**
+- 这 7 个全在「配置五源 + `campaign/run.py`」区，属**高危耦合区**，但两边改的是**不同区域**（上游改活动列表轮换，Fork 改 ModHandler/Dashboard 组）→ git 自动合并成功
+- **生成器幂等验证是关键**：合并后跑 `config_updater`，`git status` 为空 → 证明自动合并后的五源仍然自洽
+- 教训：**"候选多"不等于"冲突多"**。别因为候选里有高危文件就提前手工介入（`conflict-ledger.md` C-004 已经说过一次，这里再次印证）
 
 ---
 

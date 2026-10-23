@@ -10,89 +10,133 @@
 
 | 项 | 值 |
 |---|---|
-| **同步时间** | 2026-10-17 10:31 +0800 |
-| **上游区间** | `56e6ce0b0` → `cb16b4a89`（6 个提交，11 个文件） |
-| **dev 合并提交** | `6879ba03d` |
-| **master 合并提交** | `482405621`（**用 worktree 完成**，主工作区 HEAD 全程未离开 dev） |
-| **ziyong** | `6879ba03d`（与 dev 快进一致） |
+| **同步时间** | 2026-10-23 11:54 +0800 |
+| **上游区间** | `cb16b4a89` → `4d88c22d8`（**29 个提交，61 个文件**） |
+| **dev 合并提交** | `e6dda2ca2` |
+| **master 合并提交** | 未同步（`origin/master` 仍为 `482405621`） |
+| **ziyong** | `14f4e00d8`，**落后 dev**（待快进） |
 | **冲突** | **0 个**（`git merge-tree --write-tree` exit=0） |
-| **验证** | 9 个改动 `.py` 全过 py_compile；46 个 assets.py / 6228 条引用 / **断链 0**；生成器幂等；8 个未跟踪文件哈希未变 |
+| **冲突候选** | 7 个（全在配置五源区，见下），但全部自动合并成功 |
+| **验证** | 48 个改动 `.py` + 6 个 `.json` 全过；46 个 assets.py / **7220 条引用 / 断链 0**；**生成器幂等**；8 个未跟踪文件哈希未变 |
+| **合并规模** | 61 files changed, +3016 / -286 |
 
 ---
 
 ## 上游本次关键变动（审查 Agent 必看）
 
-### 1. 新增战斗 UI 资产 `PAUSE_Bullet`（新皮肤暂停按钮）
+### 1. 新活动 `event_20261022_cn`
 
-- 资产：`assets/cn/combat_ui/PAUSE_Bullet.png`（en/jp/tw 均指向 cn）
-- 定义：`module/combat_ui/assets.py` → `PAUSE_Bullet = Button(...)`
-- 消费方：`module/combat/combat.py`（`handle_combat_pause` 一类的暂停识别链）、`module/exercise/hp_daemon.py`（`PAUSE_*` 列表）
-- **审查要点**：如果 Fork 侧有自定义的暂停/退出逻辑（ModHandler 相关），确认新的 `PAUSE_Bullet` 也被纳入判定，否则新皮肤下会漏判 → 卡战斗
+```
+campaign/event_20261022_cn/campaign_base.py  (+25)
+campaign/event_20261022_cn/sp.py             (+97)
+campaign/event_20261022_cn/t1.py ~ t6.py     （6 个关卡）
+module/eventstory/eventstory.py              (+1)  ← eventstory 支持
+```
 
-### 2. 岛屿慢设备修复（3 处）
+- 配置侧：`args.json` 的 Event `option_cn/en/jp/tw` 由 `event_20260908_cn` 轮换为 `event_20261022_cn`（TW 保留了旧列表，见 diff）
+- **注意**：活动列表**不是**写在 `argument.yaml` 里的，而是生成器**扫描 `campaign/` 目录**得出 → 合并后跑生成器会自动对齐，不要手工改 `args.json`
+
+### 2. 新战争档案 ×2
+
+```
+campaign/war_archives_20241024_cn/   （campaign_base + t1~t6）
+campaign/war_archives_20251023_cn/   （campaign_base + t1~t6）
+module/war_archives/assets.py        (+2)
+module/war_archives/dictionary.py    (+2)   ← Sleeping Sea / Islas de Libertad 词条
+campaign/campaign_war_archives/campaign_base.py (+7/-1)
+```
+
+- 新增资产：`assets/cn/war_archives/TEMPLATE_TEMPESTA_AND_ISLAS_DE_LIBERTAD.png`、`TEMPLATE_TEMPESTA_AND_THE_SLEEPING_SEA.png`
+- 另修：滚动战争档案时按滑动次数而非截图次数限流（`f4771761b`）
+
+### 3. Chapter T & SP
+
+```
+a14b1e56a Add: Chapter T & SP
+25f8baa77 Fix: map configs in chapter T
+dev_tools/map_extractor.py (+5/-2)
+```
+
+### 4. 岛屿线大改（本批最大风险区）
 
 | 文件 | 变动 |
 |---|---|
-| `module/island_handler/assets.py` | 新增 `ISLAND_RESTAURANT_ANIMATION_CHECK`（cn 资产，四服共用） |
-| `module/island/business.py` | 进餐厅的判定由 `self.is_in_island_restaurant()` 改为 `self.appear(ISLAND_RESTAURANT_ANIMATION_CHECK, offset=(-170,-20,20,20))` |
-| `module/island/production.py` | 生产完成判定由内联 `for _ in self.loop(timeout=5)` 改为调用 `self.ensure_island_production_page()`；并把 `self.handle_island_additional()` **移进** `ensure_island_production_page()` 的循环里 |
-| `module/island_handler/restaurant.py` / `shop.py` | 慢设备下的进入与名称 OCR 重试 |
+| `module/island_handler/exchange.py` | **+305/-48**，重构 |
+| `module/island_handler/production_plan_calculator.py` | +55/-17 |
+| `module/island_handler/recipe.py` | +59/-5 |
+| `module/island_handler/shop.py` | +58/-11 |
+| `module/island_handler/shop_ui.py` | +27（新拆分文件） |
+| `module/island/production.py` | +22/-1 |
+| `module/island/collect.py` | +7/-1（慢机 dock 扫描重试） |
+| `module/os_shop/shop.py`、`module/shop/clerk.py`、`module/private_quarters/private_quarters.py` | 小修 |
 
-- **审查要点**：`handle_island_additional()` 的位置变化会影响"额外弹窗"处理时机；若 Fork 在岛屿线有挂钩（仪表盘记录），确认没被绕过
+行为变化：保护库存、鱼→鱼肉兑换、牧场次产物按 3 批摊销、硬地板生产优先级、商店名称 OCR 正则清洗 + 只在完全识别不到时重试。
 
-### 3. 工具改动 `dev_tools/uiautomator2_screenshot.py`
+**新增资产**：`assets/island/character/{Anchorage,Leonardo_da_Vinci,Mogador}.png`
 
-- 截图改存 **webp**，`cv2.IMWRITE_WEBP_QUALITY = 101`（>100 为无损）
-- 修了一个 bug：`ext.lower() == '.webp'` → `'webp'`（原先带点判断永远不成立）
-- `similarity >= 1` 时跳过模板匹配（`sim = -1`，强制保存每一帧）
+### 5. 地图 / 其他
 
-- **审查要点**：这是 `dev_tools/` 下的独立工具，**不参与 ALAS 运行时**，风险低；但注意 `screenshots/` 目录产物格式变了（`.png` → `.webp`）
+- `module/map/fleet_bar.py` **+70/-30**、`module/map/map_fleet_preparation.py`
+- memu 模拟器 `MAP_PREPARATION` 缺模糊背景修复、半加载 infobar 遮挡舰队选项修复
+- `module/campaign/campaign_ui.py`、`module/campaign/run.py`（+6）—— **run.py 在 Fork 侧也被改过（ModHandler 挂钩），本次自动合并成功**
 
-### 4. 上游整体方向提示
+### 6. ★ 上游新增单元测试目录
 
-本批延续 2026-10-16 `#6026` 的**素材去重**方向：新增资产一律只有 `assets/cn/` 一份，`assets.py` 里 en/jp/tw 直接指向 cn。**后续上游新增 Button 大概率沿用此风格**，审查时不必再为"为什么 en 指向 cn"困惑。
+```
+tests/island_handler/test_exchange.py
+tests/island_handler/test_production_plan_calculator.py
+tests/island_handler/test_recipe_fish.py
+tests/island_handler/test_recipe_modes.py
+tests/island_handler/test_shop_product_name_ocr.py
+tests/island_handler/test_shop_protected_items.py
+```
+
+上游开始给岛屿逻辑补测试。**Fork 侧没有对应机制**，审查时可留意这些测试是否需要跟随 ModHandler 的语义调整（目前不冲突）。
 
 ---
 
 ## 给审查 Agent 的重点提示
 
-1. **本批零冲突，但不要因此跳过红线 1**：`module/config/config_updater.py` 的 `min_depth=1`、`module/config/argument/dashboard.yaml` 必须仍在。
-2. **`module/combat/combat.py` 与 `module/exercise/hp_daemon.py` 是新增接触点**：这两个文件在 Fork 侧的差异极小（本批之前基本无魔改），但如果将来要挂 ModHandler 的"敏感任务"判定，注意别和上游的 `PAUSE_*` 识别链打架。
-3. **岛屿线**（`module/island/`、`module/island_handler/`）属于纯上游区，本批改动可直接接受；重点看 `handle_island_additional()` 移位是否影响仪表盘记录。
-4. **下一批上游若继续动 `module/campaign/assets.py`**，务必先读 `conflict-ledger.md` C-001，按变量名逐行判定。
+1. **配置五源全部被两边改过**（`args.json`、4 个 i18n、`template.json`、`campaign/run.py`），但自动合并成功且**生成器幂等通过** → 五源一致，不需要手工修。
+2. **`module/campaign/run.py` 是 Fork 的 ModHandler 挂钩点**，本批上游也改了它（+6）。重点看 ModHandler 的任务事件挂钩是否被绕开。
+3. **岛屿线改动极大**（exchange 重构 +305/-48）。如果 Fork 在岛屿有仪表盘记录挂钩（`module/log_res/log_res.py` 不在本批改动里，但岛屿资源记录可能受影响），需要实测。
+4. **新增 `tests/` 目录**：审查时可以顺手跑一下 `tests/island_handler/`，作为岛屿改动的额外回归。
+5. 本批零冲突，但**冲突候选有 7 个** —— 别被"零冲突"麻痹，配置区仍需看生成器结果。
 
 ---
 
 ## 下一批同步的预判
 
-- `origin/master` 已到 `482405621`，与 `origin/dev`（`6879ba03d`）同步于同一上游点 `cb16b4a89`
-- 下次合并前先跑：`git merge-tree --write-tree --name-only dev upstream/master`，exit=0 就放心合
-- 若出现多个冲突文件 → 大概率是上游又做结构性重构（如再次批量改 `assets.py` 路径），走 C-001/C-002 范式
+- `upstream/master` = `4d88c22d8`，`origin/dev` = `e6dda2ca2`
+- `origin/master` = `482405621`，**落后上游 29 个提交**（下次要单独同步，务必用 worktree）
+- `origin/ziyong` = `14f4e00d8`，**落后 dev**（待快进）
 
-### 2026-10-18 复查：上游无新提交，无需合并
+**下次开工第一步**：`git fetch upstream && git rev-parse upstream/master`，仍是 `4d88c22d8` 就说明上游没动。
 
+### ⚠️ 方法论修正（2026-10-23 发现，已写入 fork-override-map 第四节）
+
+计算"魔改面"**不能用 `git diff --name-only upstream/master dev`** —— 在未同步状态下，上游的新增文件会被算进"魔改面"，导致数字虚高（本次虚高到 116）。正确做法是用 **merge-base**：
+
+```bash
+base=$(git merge-base dev upstream/master)
+git diff --name-only $base dev            # fork 侧改动（本次 62）
+git diff --name-only $base upstream/master # 上游改动（本次 61）
+comm -12 ...                               # 真正的冲突候选
 ```
-git rev-list --count cb16b4a89..upstream/master        → 0
-git ls-remote upstream refs/heads/master               → cb16b4a89（与本地一致）
-```
-
-- 结论：**自 2026-10-17 那次同步以来，上游 `LmeSzinc/AzurLaneAutoScript` 没有任何新提交**。本次任务未产生合并提交。
-- 顺带发现并已修正：魔改面由 54 → **62**（新增 8 个 AI 协作体系文件），`fork-override-map.md` 的基线数字已同步更新。
-- 下次开工只需重新 `fetch upstream` 确认 HEAD 是否仍为 `cb16b4a89`；变了才需要合并。
 
 ---
 
 ## 更新记录
 
-| 时间 | 同步区间 | dev 合并提交 | 冲突数 |
-|---|---|---|---|
-| 2026-10-17 | `56e6ce0b0 → cb16b4a89` | `6879ba03d` | 0 |
+| 时间 | 同步区间 | 提交数 | dev 合并提交 | 冲突数 |
+|---|---|---|---|---|
+| 2026-10-23 | `cb16b4a89 → 4d88c22d8` | 29 | `e6dda2ca2` | 0（候选 7） |
+| 2026-10-17 | `56e6ce0b0 → cb16b4a89` | 6 | `6879ba03d` | 0 |
+| 2026-10-18（复查） | 无新提交 | 0 | — | — |
 
 ---
 
-## GitHub 远端状态（2026-10-18 实测）
-
-### 远端与分支
+## GitHub 远端状态（2026-10-23 实测）
 
 ```
 origin    https://github.com/dmsxj3/alasjmdh              （我的 Fork，唯一推送目标）
@@ -101,15 +145,13 @@ upstream  https://github.com/LmeSzinc/AzurLaneAutoScript  （上游，只 fetch�
 
 | 分支 | SHA | 角色 |
 |---|---|---|
-| `origin/dev` | `6879ba03d` | **主开发线 + 经验库规范源（canonical）** |
-| `origin/ziyong` | `6879ba03d` | 跑 ALAS 的克隆跟踪它；必须等于 dev |
-| `origin/master` | `482405621` | **GitHub 默认分支**（`origin/HEAD -> origin/master`）；仪表盘 + 上游，不含 ModHandler |
+| `origin/dev` | `e6dda2ca2` | **主开发线 + 经验库规范源（canonical）** |
+| `origin/ziyong` | `14f4e00d8` | 跑 ALAS 的克隆跟踪它；必须等于 dev（待快进） |
+| `origin/master` | `482405621` | **GitHub 默认分支**；仪表盘 + 上游，不含 ModHandler |
 
 **没有 `main` 分支。** 经验库以 `origin/dev` 为准。
 
 ### 经验库的跨软件读取路径
-
-`.agents/memory/`、`AGENTS.md`、`MEMORY.md` 已提交到 `origin/dev`。其他软件 / 其他分支读取方式：
 
 ```bash
 git -c http.version=HTTP/1.1 fetch origin --prune
@@ -118,7 +160,7 @@ git checkout origin/dev -- .agents/ AGENTS.md MEMORY.md
 
 **不需要切分支**，也不需要 clone 第二个工作区。
 
-### 推送纪律（与 `fork-override-map.md` 5.2 一致）
+### 推送纪律
 
 - 全部 `-c http.version=HTTP/1.1`，失败重试
 - 只允许 fast-forward；`--dry-run` 出现 `+` 前缀即中止
@@ -126,15 +168,3 @@ git checkout origin/dev -- .agents/ AGENTS.md MEMORY.md
 - `master` 只在 worktree 里操作
 - **无 GitHub Actions**，推送不触发 CI → 所有验证必须推送前本地完成
 - 本 Fork **不提 PR**（历史 0 条），改动直接 push 分支
-
-### 本轮新增的自动化环节
-
-两个 Skill 的账本读写已绑定 GitHub 远端：
-
-| 时点 | 强制动作 |
-|---|---|
-| 任务开始（阶段 1 最前） | `git fetch origin --prune` + `git checkout origin/dev -- .agents/ AGENTS.md MEMORY.md` |
-| 任务结束（最后阶段末） | `git add .agents/ AGENTS.md MEMORY.md` → `git commit -m "chore(agent-memory): sync latest merge/review experience"` → `git push origin HEAD` |
-
-即：**任何 Agent 的经验更新都会实时回到 GitHub，供 DSH / ZCode / Codex 下次读取。**
-

@@ -159,3 +159,19 @@ Merge remote-tracking branch 'upstream/master' into dev
 ### 2026-10-18 审查回写：红线 9 提醒（建议级，未修）
 
 - `6879ba03d`（2026-10-17 合并 56e6ce0b0→cb16b4a89）的提交信息是 git 默认的 `Merge remote-tracking branch 'upstream/master' into dev`，**未按红线 9 范例写同步区间 + 提交数 + 按模块要点**。功能无影响，后续合并提交应补上（范例见红线 9）。
+
+### 2026-10-23 合并回写：红线 3 基线再更新（实测）
+
+- 本次合并 `cb16b4a89 → 4d88c22d8`（29 提交 / 61 文件）后实测：**46 个 assets.py / 7220 条引用 / 断链 0**
+- 与 2026-10-18 记录的 45 / 7204 差 1 个文件、16 条引用（<0.3%）—— 属扫描口径差异（本次扫描含 `module/` + `campaign/` + `tests/`，且正则加入 `gif`），**断链 0 判据一致**
+- 引用数增长来源：本批新增 6 个资产（`TEMPLATE_SIREN_TempestaGhostBoss02.gif`、两个 `war_archives` 模板、3 个 `island/character` 模板）与新增活动/战争档案的 Button
+- **结论**：红线 3 的阻断判据仍为「断链 > 0」，数字基线用「最近一次实测」即可
+
+### 2026-10-23 合并回写：新增红线 10（方法论，阻断级）
+
+**计算"魔改面"和"冲突候选"必须以 `git merge-base` 为基准，不能用 `upstream/master`。**
+
+- 错误做法：`git diff --name-only upstream/master dev` —— 未同步时会把上游新增文件算成"魔改面"（本次虚高到 116，真实 62），进而把上游全部改动误判为冲突候选（算出 61 个，实际 0 冲突）
+- 正确做法：`base=$(git merge-base dev upstream/master)`，两侧都基于 `$base` 做 diff
+- **权威判据永远是 `git merge-tree --write-tree` 的退出码**，不是候选数量
+- 详见 `fork-override-map.md` 第四节（已同步修正）

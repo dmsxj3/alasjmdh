@@ -162,18 +162,41 @@ module/handler/         module/meeting/        module/event/
 
 ## 四、判定流程（合并前必跑）
 
+> ⚠️ **2026-10-23 修正**：早期版本用 `git diff --name-only upstream/master dev` 当"魔改面"，**这是错的**。
+> 在未同步状态下，上游的新增文件也会出现在这个 diff 里，导致魔改面虚高（本次虚高到 **116**，真实只有 **62**），
+> 进而把上游全部改动误判成"冲突候选"（算出 61 个，实际 `merge-tree` 零冲突）。
+> **必须以 merge-base 为基准。**
+
 ```bash
-# 1. 取当前魔改面（应 = 62 个文件 = 54 业务魔改 + 8 AI 协作体系；数量突变说明保护清单变了）
-git diff --name-only upstream/master dev | sort > /tmp/fork_files.txt
+d="C:/Users/zzz/workbuddy-ai/workbuddyai/AzurLaneAutoScript"
+cd "$d"
 
-# 2. 取上游本次改动
-git diff --name-only <上次同步点> upstream/master | sort > /tmp/up_files.txt
+# 1. 先抓上游，再取 merge-base（= 上次同步点）
+git -c http.version=HTTP/1.1 fetch --no-tags upstream master
+base=$(git merge-base dev upstream/master)
+echo "merge-base = $base"
 
-# 3. 冲突候选 = 交集
+# 2. fork 侧改动（应 = 62 个：54 业务魔改 + 8 AI 协作体系）
+git diff --name-only "$base" dev            | sort > /tmp/fork_files.txt
+
+# 3. 上游本次改动
+git diff --name-only "$base" upstream/master | sort > /tmp/up_files.txt
+
+# 4. 真正的冲突候选 = 交集
 comm -12 /tmp/fork_files.txt /tmp/up_files.txt
 
-# 4. 对交集里的每个文件，先归类（核心保护 / 高危耦合），再决定合并策略
+# 5. 权威判定：预演（exit=0 即零冲突，不管候选有几个）
+git merge-tree --write-tree --name-only dev upstream/master
 ```
+
+**关键认知**：`comm -12` 出来的只是**候选**（两边都碰过的文件），**不代表一定冲突**。以 `merge-tree` 的退出码为准。2026-10-23 那次候选 7 个、实际冲突 0 个。
+
+**魔改面数字的两种口径**（别混用）：
+
+| 口径 | 命令 | 何时用 | 2026-10-23 实测 |
+|---|---|---|---|
+| **同步后**（dev 已含上游） | `git diff --name-only upstream/master dev` | 刚同步完、想确认保护清单 | 62 |
+| **同步前**（必须用 base） | `git diff --name-only $(git merge-base dev upstream/master) dev` | 准备合并时 | 62（而错误口径算出 116） |
 
 ---
 
