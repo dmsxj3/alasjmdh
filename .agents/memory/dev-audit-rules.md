@@ -175,3 +175,11 @@ Merge remote-tracking branch 'upstream/master' into dev
 - 正确做法：`base=$(git merge-base dev upstream/master)`，两侧都基于 `$base` 做 diff
 - **权威判据永远是 `git merge-tree --write-tree` 的退出码**，不是候选数量
 - 详见 `fork-override-map.md` 第四节（已同步修正）
+
+### 2026-10-23 审查回写：红线 1 补充——min_depth=1 必须分分支检查（阻断级发现，未修）
+
+- **发现**：`origin/master` 的 `module/config/config_updater.py:177` 为 `deep_iter(dashboard_and_task, depth=3)`，**缺 `min_depth=1`**；dev:179 有。master 上 `dashboard.yaml` 存在 + 178 行 `'Dashboard' in path` 分支存在 → **master 检出态跑一次生成器即清空 Dashboard 配置组**。
+- **根因**：修复 `c651aae36`（2026-09-24）只提交在 dev 线，从未同步 master（`git log -S 'min_depth=1' master -- module/config/config_updater.py` 为空）。非合并丢失，是**跨分支历史遗漏**。
+- **检测命令**：`git show origin/master:module/config/config_updater.py | grep -n 'min_depth=1'`（dev 侧红线 1 已有；**今后每次 master 合并后也要查 master 侧**）。
+- **修法（待用户裁决）**：worktree 里 `git cherry-pick c651aae36` 后 push master。
+- **教训**：fork 的关键修复落在 dev 后，**不会自动到达 master/ziyong**。今后 dev 上新增"红线级修复"提交时，应评估是否需要 cherry-pick 到 master。

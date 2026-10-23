@@ -10,15 +10,19 @@
 
 | 项 | 值 |
 |---|---|
-| **同步时间** | 2026-10-23 11:54 +0800 |
+| **同步时间** | 2026-10-23 11:54 +0800（master 补同步 12:30，worktree 完成） |
 | **上游区间** | `cb16b4a89` → `4d88c22d8`（**29 个提交，61 个文件**） |
 | **dev 合并提交** | `e6dda2ca2` |
-| **master 合并提交** | 未同步（`origin/master` 仍为 `482405621`） |
+| **master 合并提交** | `b203c937d`（2026-10-23 用 **worktree** 完成，主工作区 HEAD 全程未离开 dev；验证：零冲突、3 Button/dashboard.yaml 保留、7216 引用断链 0、py 编译过；push 预检 fast-forward 后推送，`482405621..b203c937d`） |
 | **ziyong** | `14f4e00d8`，**落后 dev**（待快进） |
-| **冲突** | **0 个**（`git merge-tree --write-tree` exit=0） |
+| **冲突** | **0 个**（dev 与 master 两侧均零冲突；冲突候选 7 个全在配置五源区，全部自动合并成功） |
 | **冲突候选** | 7 个（全在配置五源区，见下），但全部自动合并成功 |
-| **验证** | 48 个改动 `.py` + 6 个 `.json` 全过；46 个 assets.py / **7220 条引用 / 断链 0**；**生成器幂等**；8 个未跟踪文件哈希未变 |
+| **验证** | 48 个改动 `.py` + 6 个 `.json` 全过；45+ 个 assets.py / **7216 条引用 / 断链 0**（dev 与 master 实测一致）；**生成器幂等**（dev 侧 worktree 实测 exit=0 + `update_file:` 收尾 + status 空）；8 个未跟踪文件哈希未变 |
 | **合并规模** | 61 files changed, +3016 / -286 |
+
+### ⚠️ 审查发现（2026-10-23，未修，待用户裁决）
+
+**master 分支缺 `min_depth=1`**：`module/config/config_updater.py:177` 是 `deep_iter(dashboard_and_task, depth=3)`（无 min_depth），而 dev:179 有。该修复 2026-09-24 由 `c651aae36` 只提交在 dev 线，**从未同步到 master**（`git log -S 'min_depth=1' master -- module/config/config_updater.py` 为空）。master 上有 `dashboard.yaml` + 177 行遍历 + 178 行 `'Dashboard' in path` 分支 → **在 master 检出态跑一次生成器会清空 Dashboard 配置组**（红线 1 头号坑在 master 上成立）。修法：`git checkout master && git cherry-pick c651aae36`（或等价最小 diff）。当前实际跑 ALAS 的克隆在 dev/ziyong，暂不受影响。
 
 ---
 
